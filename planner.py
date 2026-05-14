@@ -233,16 +233,59 @@ class Planner:
             "final_output": "Professional PDF report with visualizations"
         }
 
-    def create_plan(self, user_query: str, orchestrator=None) -> Dict[str, Any]:
+    def _create_coding_plan(self, query: str) -> Dict[str, Any]:
+        """Create a coding-focused task plan."""
+        return {
+            "query": query,
+            "reasoning": "User has a coding task, so I'll gather technical documentation and implementation details.",
+            "pipeline": [
+                {
+                    "tool": "wikipedia_search",
+                    "purpose": "Get core concept definitions",
+                    "input": query
+                },
+                {
+                    "tool": "arxiv_summarizer",
+                    "purpose": "Find academic algorithms or papers related to the technical task",
+                    "input": query
+                },
+                {
+                    "tool": "qa_engine",
+                    "purpose": "Generate technical implementation logic and code blocks",
+                    "input": f"Write technical code and documentation for: {query}"
+                }
+            ],
+            "final_output": "Technical implementation and code documentation"
+        }
+
+    def _create_brainstorming_plan(self, query: str) -> Dict[str, Any]:
+        """Create a brainstorming task plan."""
+        return {
+            "query": query,
+            "reasoning": "User wants to brainstorm, so I'll gather diverse inspirations and creative perspectives.",
+            "pipeline": [
+                {
+                    "tool": "news_fetcher",
+                    "purpose": "Get current trends and creative inspirations",
+                    "input": query
+                },
+                {
+                    "tool": "wikipedia_search",
+                    "purpose": "Explore related lateral concepts",
+                    "input": query
+                },
+                {
+                    "tool": "qa_engine",
+                    "purpose": "Generate a diverse set of creative ideas and brainstormed concepts",
+                    "input": f"Brainstorm creative ideas for: {query}"
+                }
+            ],
+            "final_output": "Creative brainstorm results and ideation list"
+        }
+
+    def create_plan(self, user_query: str, orchestrator=None, intent: str = "research_report") -> Dict[str, Any]:
         """
-        Create a task plan based on the user query with learning/adaptation.
-
-        Args:
-            user_query (str): The user's natural language query
-            orchestrator: Optional orchestrator instance for accessing learning patterns
-
-        Returns:
-            Dict[str, Any]: Structured task plan
+        Create a task plan based on the user query with learning/adaptation and intent awareness.
         """
         # LEARNING/ADAPTATION: Check for similar successful patterns
         similar_patterns = []
@@ -252,32 +295,32 @@ class Planner:
                 if similar_patterns:
                     best_match = similar_patterns[0]
                     similarity = best_match.get("similarity", 0)
-                    if similarity > 0.7:  # High similarity threshold
-                        self.logger.info(f"📚 Found similar successful pattern (similarity: {similarity:.2f})")
-                        self.logger.info(f"Learning from: {best_match.get('query', 'Unknown')}")
+                    if similarity > 0.7:
+                        self.logger.info(f"📚 Learned pattern matched (similarity: {similarity:.2f})")
             except Exception as e:
                 self.logger.debug(f"Pattern retrieval failed: {e}")
         
-        # Try to use LLM for plan generation if available
+        # Try to use LLM for plan generation
         if self.llm_client and self.llm_client.is_available():
             try:
                 llm_plan = self._create_llm_plan(user_query, similar_patterns)
                 if llm_plan and "pipeline" in llm_plan and llm_plan["pipeline"]:
-                    self.logger.info("Successfully created LLM-based plan")
                     return llm_plan
-                else:
-                    self.logger.warning("LLM plan was empty or invalid, using fallback")
-                    return self._create_fallback_plan(user_query)
             except Exception as e:
-                self.logger.warning(f"LLM plan generation failed ({type(e).__name__}), using fallback")
-                self.logger.debug(f"LLM error details: {e}")
-                return self._create_fallback_plan(user_query)
+                self.logger.warning(f"LLM planning failed, using intent-based fallback: {e}")
+        
+        # Intent-based fallback planning
+        self.logger.info(f"Using fallback plan for intent: {intent}")
+        if intent == "coding_task":
+            return self._create_coding_plan(user_query)
+        elif intent == "brainstorming":
+            return self._create_brainstorming_plan(user_query)
+        elif intent == "visualization_request" or intent == "market_analysis":
+            return self._create_analysis_plan(user_query)
+        elif intent == "research_report":
+            return self._create_report_plan(user_query)
         else:
-            self.logger.info("LLM not available, using fallback plan generation")
-            # If we have similar patterns, use them for fallback
-            if similar_patterns and similar_patterns[0].get("similarity", 0) > 0.7:
-                return self._create_plan_from_pattern(user_query, similar_patterns[0])
-            return self._create_fallback_plan(user_query)
+            return self._create_research_plan(user_query)
 
     def create_plan_with_feedback(
         self, 

@@ -50,6 +50,66 @@ class Orchestrator:
         # Execution state
         self.execution_history = []
 
+    def _preprocess_query(self, raw_query: str) -> Dict[str, Any]:
+        """
+        Use the LLM to normalize the query, fix typos, and extract intent.
+        
+        Returns:
+            Dict[str, Any]: {
+                "cleaned_query": "normalized query",
+                "search_terms": "keyword optimized for tools",
+                "intent": "research|report|code|analysis|brainstorm",
+                "detected_typos": True/False
+            }
+        """
+        self.logger.info(f"Preprocessing query: {raw_query}")
+        
+        try:
+            from llm_client import llm_client
+            
+            system_prompt = """You are the DualMind Semantic Processor.
+Your task is to analyze raw user queries and extract structured intent.
+
+1. Fix any spelling or grammar errors (e.g., 'summarisze' -> 'summarize').
+2. Extract the core search terms for research tools (ArXiv, Wikipedia).
+3. Classify the intent into one of: 
+   - research_report (comprehensive summary)
+   - technical_explanation (how things work)
+   - coding_task (implementation/programming)
+   - market_analysis (trends/companies)
+   - visualization_request (charts/graphs)
+   - brainstorming (ideas/creativity)
+
+Respond ONLY with a JSON object:
+{
+  "cleaned_query": "the corrected query",
+  "search_terms": "optimized search keywords",
+  "intent": "category",
+  "is_complex": true/false
+}"""
+            
+            response = llm_client.call_llm(
+                prompt=f"Raw Query: {raw_query}",
+                system_prompt=system_prompt,
+                require_json=True,
+                max_tokens=300
+            )
+            
+            if response and isinstance(response, dict):
+                self.logger.info(f"Query preprocessed: {response.get('cleaned_query')}")
+                return response
+                
+        except Exception as e:
+            self.logger.warning(f"Preprocessing failed, using raw query: {e}")
+            
+        # Fallback if LLM fails
+        return {
+            "cleaned_query": raw_query,
+            "search_terms": raw_query[:100],
+            "intent": "research_report",
+            "is_complex": False
+        }
+
     def _load_tools(self) -> Dict[str, Any]:
         """Load and prepare tool functions for execution."""
         tools = {}
@@ -83,27 +143,25 @@ class Orchestrator:
 
     def process_query(self, user_query: str, max_iterations: int = 2) -> Dict[str, Any]:
         """
-        Process a user query through the complete DualMind pipeline.
-
-        Args:
-            user_query (str): The user's natural language query
-            max_iterations (int): Maximum planning iterations before giving up
-
-        Returns:
-            Dict[str, Any]: Complete execution results
+        Process a user query through the complete DualMind pipeline with semantic intelligence.
         """
         start_time = time.time()
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         self.logger.info(f"Starting new session: {session_id}")
+        
+        # Phase 0: Preprocessing
+        preprocessed = self._preprocess_query(user_query)
+        cleaned_query = preprocessed.get("cleaned_query", user_query)
+        search_terms = preprocessed.get("search_terms", user_query)
 
         try:
-            # Phase 1: Initial Planning with Learning/Adaptation
-            self.logger.info("Phase 1: Generating initial task plan...")
-            plan = self.planner.create_plan(user_query, orchestrator=self)
+            # Phase 1: Initial Planning with cleaned query
+            self.logger.info(f"Phase 1: Generating plan for: {cleaned_query} (Intent: {intent})")
+            plan = self.planner.create_plan(cleaned_query, orchestrator=self, intent=intent)
             plan_explanation = self.planner.explain_plan(plan)
 
-            # Phase 2: Adversarial Loop - Verification and Iterative Improvement
+            # Phase 2: Adversarial Loop
             self.logger.info("Phase 2: Entering adversarial verification loop...")
             iteration = 0
             verification = None
@@ -150,7 +208,7 @@ class Orchestrator:
                     # CRITICAL: Actually regenerate the plan with feedback
                     try:
                         plan = self.planner.create_plan_with_feedback(
-                            user_query=user_query,
+                            user_query=cleaned_query,
                             previous_plan=plan,
                             feedback=verifier_feedback,
                             issues=issues,
@@ -198,7 +256,7 @@ class Orchestrator:
             else:
                 self.logger.warning(f"Phase 3: Executing plan with warnings (score: {final_score}/100)...")
             
-            execution_results = self._execute_pipeline_with_selfcorrection(plan, user_query, max_retries=2)
+            execution_results = self._execute_pipeline_with_selfcorrection(plan, cleaned_query, search_terms=search_terms, max_retries=2)
 
             # Phase 4: Final verification
             self.logger.info("Phase 4: Final verification of results...")
@@ -272,22 +330,30 @@ class Orchestrator:
 
     def _process_query_stream_internal(self, user_query: str, max_iterations: int = 2) -> Generator[Dict[str, Any], None, None]:
         """
-        Internal generator for streaming orchestration events.
+        Internal generator for streaming orchestration events with semantic intelligence.
         """
         start_time = time.time()
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         yield {"type": "session_started", "sessionId": session_id, "query": user_query}
         
-        # Optimistic feedback: Let the user know the neural link is active
-        yield {"type": "thought", "content": "Initializing neural orchestration pipeline..."}
+        # --- Phase 0: Semantic Preprocessing ---
+        yield {"type": "thought", "content": "Analyzing query semantics and intent..."}
+        preprocessed = self._preprocess_query(user_query)
+        cleaned_query = preprocessed.get("cleaned_query", user_query)
+        intent = preprocessed.get("intent", "research_report")
+        search_terms = preprocessed.get("search_terms", user_query)
+        
+        if cleaned_query != user_query:
+            yield {"type": "thought", "content": f"Normalized query: \"{cleaned_query}\" (Intent: {intent})"}
+        else:
+            yield {"type": "thought", "content": f"Neural intent identified: {intent}"}
 
         try:
             # --- Phase 1: Planning ---
             yield {"type": "planner_started"}
-            # Start planning in parallel with a small delay for UI effect if needed, 
-            # but here we want SPEED.
-            plan = self.planner.create_plan(user_query, orchestrator=self)
+            # Use cleaned query and intent for planning
+            plan = self.planner.create_plan(cleaned_query, orchestrator=self, intent=intent)
             plan_explanation = self.planner.explain_plan(plan)
             yield {
                 "type": "planner_completed",
@@ -325,7 +391,7 @@ class Orchestrator:
                 if iteration < max_iterations:
                     try:
                         plan = self.planner.create_plan_with_feedback(
-                            user_query=user_query,
+                            user_query=cleaned_query,
                             previous_plan=plan,
                             feedback=verifier_feedback,
                             issues=verification.get("issues", []),
@@ -355,18 +421,15 @@ class Orchestrator:
             pipeline = plan.get("pipeline", [])
             execution_results = []
             
-            # OPTIMIZATION: Execute independent tools in parallel
-            # For now, we'll keep it simple but use a ThreadPool for the tools
             from concurrent.futures import ThreadPoolExecutor
-            
             with ThreadPoolExecutor(max_workers=min(len(pipeline), 4)) as executor:
                 futures = []
                 for step_num, step in enumerate(pipeline, 1):
                     tool_name = step.get("tool", "")
                     
-                    # Note: qa_engine usually needs context from others, so it must be sequential
-                    # We'll execute others in parallel and then do qa_engine
+                    # INTELLIGENCE OVERHAUL: Skip redundant qa_engine in streaming mode
                     if tool_name == "qa_engine":
+                        self.logger.info("Skipping redundant qa_engine in streaming pipeline")
                         continue
                         
                     yield {
@@ -379,7 +442,11 @@ class Orchestrator:
                     
                     def run_tool(s_num, s_data):
                         t_name = s_data.get("tool", "")
-                        t_input = s_data.get("input", "")
+                        # Use search_terms for research tools
+                        t_input = s_data.get("input", cleaned_query)
+                        if t_name in ["wikipedia_search", "arxiv_summarizer", "news_fetcher", "semantic_scholar", "pubmed_search"]:
+                            t_input = search_terms
+                            
                         try:
                             t0 = time.time()
                             t_output = self.tools[t_name](t_input)
@@ -405,76 +472,56 @@ class Orchestrator:
                         "outputPreview": str(res.get("output", ""))[:200],
                     }
 
-                # Now handle qa_engine if present
-                for step_num, step in enumerate(pipeline, 1):
-                    if step.get("tool") == "qa_engine":
-                        yield {
-                            "type": "tool_started",
-                            "step": step_num,
-                            "totalSteps": len(pipeline),
-                            "tool": "qa_engine",
-                            "purpose": step.get("purpose", ""),
-                        }
-                        
-                        tool_input = step.get("input", "")
-                        # Context accumulation
-                        context_parts = []
-                        for prev in execution_results:
-                            if prev.get("status") == "success":
-                                out = prev.get("output", "")
-                                if out and len(str(out)) > 10:
-                                    context_parts.append(f"[{prev.get('tool','')}]: {out}")
-                        if context_parts:
-                            tool_input = f"{tool_input}|||CONTEXT:{''.join(context_parts)}"
-                        
-                        try:
-                            t0 = time.time()
-                            output = self.tools["qa_engine"](tool_input)
-                            res = {"step": step_num, "tool": "qa_engine", "status": "success",
-                                   "execution_time": time.time() - t0, "output": output,
-                                   "input": step.get("input", ""), "purpose": step.get("purpose", "")}
-                        except Exception as e:
-                            res = {"step": step_num, "tool": "qa_engine", "status": "error",
-                                   "error": str(e), "output": ""}
-                        
-                        execution_results.append(res)
-                        yield {
-                            "type": "tool_completed",
-                            "step": res["step"],
-                            "tool": "qa_engine",
-                            "status": res["status"],
-                            "executionTime": res.get("execution_time", 0),
-                            "outputPreview": str(res.get("output", ""))[:200],
-                        }
-
             # --- Phase 4: Synthesis with token streaming ---
             yield {"type": "synthesis_started"}
 
-            # Build synthesis prompt from accumulated results
+            # Build premium synthesis prompt from accumulated results
             from llm_client import llm_client
             context_parts = []
             for r in execution_results:
                 if r.get("status") == "success" and r.get("output"):
-                    context_parts.append(f"[{r['tool']}]: {str(r['output'])[:1500]}")
+                    context_parts.append(f"### Source: {r['tool']}\n{str(r['output'])[:2000]}")
 
-            synthesis_prompt = (
-                f"You are DualMind, an advanced multi-agent AI system. "
-                f"Synthesize a comprehensive, well-structured markdown answer to the user's query.\n\n"
-                f"**User Query:** {user_query}\n\n"
-                f"**Research Data from Tool Pipeline:**\n{'---'.join(context_parts)}\n\n"
-                f"Provide a thorough, well-formatted answer using markdown headings, bullet points, "
-                f"and bold text. Be authoritative and helpful."
-            )
+            # Mode-specific instructions
+            mode_instructions = {
+                "research_report": "Focus on comprehensive coverage, technical depth, and clear section hierarchy. Use professional academic tone.",
+                "technical_explanation": "Focus on mechanics, architecture, and 'how it works'. Use analogies where helpful but maintain technical accuracy.",
+                "coding_task": "Prioritize code blocks, implementation details, and step-by-step logic. Ensure code is production-grade.",
+                "market_analysis": "Focus on companies, trends, statistics, and competitive landscape. Use business-analytical tone.",
+                "visualization_request": "Structure data clearly and provide insights that can be graphed. Suggest specific chart types.",
+                "brainstorming": "Focus on creativity, diversity of ideas, and out-of-the-box thinking. Use an inspiring, lateral-thinking tone."
+            }
+
+            synthesis_prompt = f"""You are DualMind, a premium AGI Research Operating System.
+Your task is to synthesize a world-class response for the following query.
+
+**User Query:** {cleaned_query}
+**Detected Intent:** {intent}
+
+{mode_instructions.get(intent, mode_instructions["research_report"])}
+
+### RESEARCH DATA FROM ORCHESTRATION PIPELINE:
+{'---'.join(context_parts)}
+
+### SYNTHESIS REQUIREMENTS:
+1. **Premium Quality**: Avoid generic AI boilerplate ("Here is a summary", "In conclusion"). Start directly with high-signal insights.
+2. **Structural Excellence**: Use clear Markdown hierarchy (##, ###). Use bolding for key terms.
+3. **Source Grounding**: Refer to findings from the specific tools (e.g., "According to ArXiv research...", "Recent news indicates...").
+4. **No Placeholders**: Do not use "fake" data. If info is missing, acknowledge the gap intelligently.
+5. **Concise but Deep**: Every sentence must provide value. Avoid wordiness.
+6. **Report Style**: For reports, use a professional executive summary followed by detailed sections.
+
+Respond as the DualMind OS core:"""
 
             token_buffer = ""
-            for token in llm_client.call_llm_stream(synthesis_prompt, max_tokens=2000):
+            for token in llm_client.call_llm_stream(synthesis_prompt, max_tokens=3000):
                 token_buffer += token
                 yield {"type": "token", "content": token}
 
             # Fallback if streaming produced nothing
             if not token_buffer.strip():
                 from synthesizer import synthesize_answer
-                fallback = synthesize_answer(user_query, execution_results, plan)
+                fallback = synthesize_answer(cleaned_query, execution_results, plan)
                 if fallback:
                     token_buffer = fallback
                     yield {"type": "token", "content": fallback}
@@ -495,13 +542,13 @@ class Orchestrator:
             self.logger.error(f"Streaming orchestration error: {exc}")
             yield {"type": "error", "message": str(exc)}
 
-    def _execute_pipeline_with_selfcorrection(self, plan: Dict[str, Any], user_query: str, max_retries: int = 2) -> List[Dict[str, Any]]:
+    def _execute_pipeline_with_selfcorrection(self, plan: Dict[str, Any], user_query: str, search_terms: str = "", max_retries: int = 2) -> List[Dict[str, Any]]:
         """Execute pipeline with self-correction capability."""
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 self.logger.warning(f"🔄 Self-correction attempt {attempt}/{max_retries}")
             
-            execution_results = self._execute_pipeline(plan)
+            execution_results = self._execute_pipeline(plan, search_terms=search_terms)
             
             # Check if execution was successful
             # Ignore failures from non-critical tools (e.g. wikipedia_search)
@@ -584,7 +631,7 @@ class Orchestrator:
         }
         return fallback_map.get(tool_name)
     
-    def _execute_pipeline(self, plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _execute_pipeline(self, plan: Dict[str, Any], search_terms: str = "") -> List[Dict[str, Any]]:
         """Execute the planned tool pipeline with context accumulation."""
         execution_results = []
         pipeline = plan.get("pipeline", [])
@@ -619,6 +666,11 @@ class Orchestrator:
                 }
             else:
                 try:
+                    # INTELLIGENCE OVERHAUL: Use search_terms for research tools
+                    if search_terms and tool_name in ["wikipedia_search", "arxiv_summarizer", "news_fetcher", "semantic_scholar", "pubmed_search"]:
+                        tool_input = search_terms
+                        self.logger.info(f"Using optimized search terms for {tool_name}: {search_terms}")
+                        
                     # Execute the tool
                     start_time = time.time()
                     output = self.tools[tool_name](tool_input)
