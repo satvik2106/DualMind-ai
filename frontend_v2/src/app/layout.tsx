@@ -14,8 +14,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DualMind | Autonomous Intelligence OS",
-  description: "The futuristic multi-agent AI operating system.",
+  title: "DualMind — AI Operating System",
+  description: "A realtime AI Operating System with cinematic multi-agent orchestration. Plan. Research. Verify. Synthesize.",
+  icons: {
+    icon: "/favicon.svg",
+  },
+  openGraph: {
+    title: "DualMind — AI Operating System",
+    description: "A realtime AI Operating System with cinematic multi-agent orchestration.",
+    url: "https://dualmind-ai.web.app",
+    siteName: "DualMind",
+    type: "website",
+  },
+  metadataBase: new URL("https://dualmind-ai.web.app"),
 };
 
 export default function RootLayout({

@@ -54,7 +54,8 @@ export async function streamChat(message: string): Promise<void> {
 
   const runStream = async (): Promise<void> => {
     try {
-      const response = await fetch('/api/chat/stream', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const response = await fetch(`${apiUrl}/api/chat/stream`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'

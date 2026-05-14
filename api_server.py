@@ -324,7 +324,10 @@ app = FastAPI(
 )
 
 # --- CORS & Security ---
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:3000,http://localhost:3001,https://dualmind-ai.web.app,https://dualmind-88ab9.web.app,https://dualmind-88ab9.firebaseapp.com,https://dualmind-ai-cgss.onrender.com"
+).split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -361,10 +364,23 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png"}
 ALLOWED_PDF_TYPES = {"application/pdf"}
 
 
+@app.get("/")
+async def root() -> dict:
+    """Root endpoint for Render health checks and frontend connectivity validation."""
+    return {
+        "status": "online",
+        "service": "DualMind Orchestration API",
+        "version": "1.0.0",
+        "streaming": True,
+    }
+
+
+@app.get("/health")
 @app.get("/api/health")
 async def health() -> dict:
     """Health-check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    uptime = round(time.time() - startup_time, 1)
+    return {"status": "healthy", "uptime_seconds": uptime, "timestamp": datetime.utcnow().isoformat()}
 
 
 class StreamChatRequest(BaseModel):
@@ -577,7 +593,8 @@ async def upload_endpoint(
 if __name__ == "__main__":  # pragma: no cover
     import uvicorn
 
-    port = int(os.getenv("API_PORT", "8000"))
+    # Render sets PORT; fallback to API_PORT or 8000 for local dev
+    port = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
     host = os.getenv("API_HOST", "0.0.0.0")
-    logger.info("Starting API server on %s:%s", host, port)
+    logger.info("Starting DualMind API on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port)
