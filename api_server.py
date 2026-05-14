@@ -11,13 +11,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+import time
+
+# --- Production Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("dualmind_api")
 
 from orchestrator import create_orchestrator
 from tools.pdf_parser import PDFParserTool
+from firebase_helper import init_firebase
 from tools.wikipedia_search import wikipedia_search_tool
 
 try:
@@ -27,31 +36,17 @@ except ImportError:
 
 
 CASUAL_GREETINGS = {
-    "hi",
-    "hello",
-    "hey",
-    "heya",
-    "hiya",
-    "howdy",
-    "yo",
-    "sup",
-    "what's up",
-    "whats up",
-    "good morning",
-    "good afternoon",
-    "good evening",
-    "thanks",
-    "thank you",
-    "ty",
-    "hey there",
+    "hi", "hello", "hey", "heya", "hiya", "howdy", "yo", "sup", "what's up", "whats up",
+    "good morning", "good afternoon", "good evening", "thanks", "thank you", "ty", "hey there",
+    "who are you", "what are you", "help", "menu", "status", "ready", "ok", "cool", "nice",
 }
 
 LIGHTWEIGHT_RESPONSES = [
-    "Hey there! How's it going?",
-    "Hi! I'm here whenever you need me.",
-    "Hello! Ready to help when you are.",
-    "Hey! What can I do for you today?",
-    "Hi! Hope you're having a great day.",
+    "DualMind OS online. I'm ready to orchestrate your commands. What's on your mind?",
+    "Hello! I've initialized the neural link. How can I assist you today?",
+    "Hey! The multi-agent pipeline is active. Give me a complex task to solve.",
+    "System ready. I can research papers, fetch news, or analyze data for you.",
+    "DualMind here. Standing by for your next query.",
 ]
 
 DEFAULT_ERROR_RESPONSE = "I wasn't able to generate a response. Please try again."
@@ -59,11 +54,9 @@ DEFAULT_ERROR_RESPONSE = "I wasn't able to generate a response. Please try again
 LAST_VALID_RESPONSES: Dict[str, str] = {}
 LAST_GLOBAL_RESPONSE: Optional[str] = None
 
-
 def _normalize_message(message: str) -> str:
     """Normalize whitespace and casing for comparison."""
     return " ".join(message.lower().strip().split())
-
 
 def _is_casual_message(message: str) -> bool:
     """Detect lightweight greetings or casual conversation openers."""
@@ -71,12 +64,18 @@ def _is_casual_message(message: str) -> bool:
     if not normalized:
         return False
 
+    # Exact matches for greetings
     if normalized in CASUAL_GREETINGS:
         return True
 
+    # Short phrases or help requests
     words = normalized.split()
-    if len(words) <= 3 and all(word in CASUAL_GREETINGS for word in words):
-        return True
+    if len(words) <= 4:
+        # Check if all words are greetings or if it's a 'who are you' style query
+        if all(word in CASUAL_GREETINGS for word in words):
+            return True
+        if normalized in ["who are you", "what is this", "how are you"]:
+            return True
 
     return False
 
@@ -318,22 +317,41 @@ def _sanitize_text(text: str) -> str:
 
 
 # FastAPI application setup
-app = FastAPI(title="Claude-Style Chatbot API", version="1.0.0")
+app = FastAPI(
+    title="DualMind Orchestration API",
+    description="Production-grade multi-agent AGI operating system backend.",
+    version="1.0.0"
+)
+
+# --- CORS & Security ---
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
+startup_time = time.time()
+
 orchestrator = create_orchestrator()
 pdf_parser = PDFParserTool()
+
+@app.on_event("startup")
+async def startup_event():
+    init_firebase()
+
+# --- Auth Dependency ---
+from firebase_helper import verify_id_token
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+auth_scheme = HTTPBearer()
+
+async def get_current_user():
+    """No-op auth for anonymous mode."""
+    return {"uid": "dualmind_global_user", "email": "anonymous@dualmind.ai"}
 
 UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -347,6 +365,53 @@ ALLOWED_PDF_TYPES = {"application/pdf"}
 async def health() -> dict:
     """Health-check endpoint."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+class StreamChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    conversationId: str = Field(default="")
+
+
+@app.post("/api/chat/stream")
+async def stream_chat_endpoint(payload: StreamChatRequest, user: dict = Depends(get_current_user)):
+    """SSE streaming endpoint for the real-time orchestration experience."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    message = _sanitize_text(payload.message)
+    if not message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    # Handle lightweight / casual messages immediately
+    if _is_casual_message(message):
+        response_text = random.choice(LIGHTWEIGHT_RESPONSES)
+
+        async def _casual_stream():
+            for evt in [
+                {"type": "session_started", "sessionId": None, "query": message},
+                {"type": "token", "content": response_text},
+                {"type": "completed", "sessionId": None, "executionTime": 0,
+                 "toolsExecuted": 0, "successCount": 0},
+            ]:
+                yield f"data: {json.dumps(evt)}\n\n"
+
+        return StreamingResponse(_casual_stream(), media_type="text/event-stream")
+
+    # Full orchestration streaming
+    def _orchestration_stream():
+        for evt in orchestrator.process_query_stream(message, conversation_id=payload.conversationId):
+            yield f"data: {json.dumps(evt, default=str)}\n\n"
+
+    return StreamingResponse(
+        _orchestration_stream(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Critical for Nginx
+            "Content-Encoding": "none",
+        }
+    )
 
 
 @app.post("/api/chat", response_model=ChatResponse)

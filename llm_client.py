@@ -11,7 +11,7 @@ import logging
 import time
 import re
 import requests
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Generator, Optional, List, Union
 from dotenv import load_dotenv
 from functools import wraps
 from datetime import datetime, timedelta
@@ -58,7 +58,8 @@ class LLMClient:
         load_dotenv()
 
         self.logger = logging.getLogger(__name__)
-        self.rate_limiter = RateLimiter(calls_per_minute=10)
+        # Production: 60 calls/minute allows for 1 request per second
+        self.rate_limiter = RateLimiter(calls_per_minute=60)
 
         # --- Provider: NVIDIA ---
         self.nvidia_api_key = os.getenv("NVIDIA_API_KEY")
@@ -411,6 +412,127 @@ class LLMClient:
             f"[{provider}] Max retries exceeded. Last error: {last_error}"
         )
         return None
+
+    # ------------------------------------------------------------------
+    # Streaming interface
+    # ------------------------------------------------------------------
+
+    def call_llm_stream(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        max_tokens: int = 2000,
+    ) -> Generator[str, None, None]:
+        """
+        Stream tokens from the active LLM provider.
+
+        Yields individual token strings as they arrive from the upstream
+        API.  Falls back to a single-chunk yield if streaming is not
+        supported by the active provider.
+        """
+        providers: List[str] = []
+        if self._active_provider == "nvidia" and self.nvidia_api_key:
+            providers.append("nvidia")
+        if self.openrouter_api_key:
+            providers.append("openrouter")
+        if not providers:
+            yield "No LLM provider available."
+            return
+
+        for provider in providers:
+            try:
+                if provider == "nvidia":
+                    yield from self._stream_nvidia(prompt, system_prompt, max_tokens)
+                elif provider == "openrouter":
+                    yield from self._stream_openrouter(prompt, system_prompt, max_tokens)
+                return  # success — stop trying other providers
+            except Exception as exc:
+                self.logger.warning(f"Streaming via {provider} failed: {exc}")
+                continue
+
+        # All providers failed — fall back to non-streaming call
+        self.logger.warning("All streaming providers failed; falling back to synchronous call.")
+        result = self.call_llm(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
+        if result:
+            yield str(result)
+
+    def _stream_nvidia(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        max_tokens: int,
+    ) -> Generator[str, None, None]:
+        """Yield tokens from NVIDIA Build API with stream=True."""
+        client = self._get_nvidia_client()
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        stream = client.chat.completions.create(
+            model=self.nvidia_model,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.7,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    def _stream_openrouter(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        max_tokens: int,
+    ) -> Generator[str, None, None]:
+        """Yield tokens from OpenRouter API with stream=True."""
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_api_key.strip()}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/satvik2106/HuggingGpt",
+            "X-Title": "DualMind Orchestrator",
+        }
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        data = {
+            "model": self.openrouter_model,
+            "messages": messages,
+            "max_tokens": max(100, min(max_tokens, 4000)),
+            "stream": True,
+        }
+
+        resp = requests.post(
+            f"{self.openrouter_base_url}/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=120,
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8", errors="replace")
+            if line.startswith("data: "):
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    return
+                try:
+                    obj = json.loads(payload)
+                    delta = obj.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield content
+                except json.JSONDecodeError:
+                    continue
 
     def is_available(self) -> bool:
         """Check if any LLM provider is available."""

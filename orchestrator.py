@@ -8,7 +8,7 @@ import json
 import logging
 import time
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Generator, List, Optional
 from datetime import datetime
 
 class Orchestrator:
@@ -255,6 +255,245 @@ class Orchestrator:
 
             self._log_session(error_results)
             return error_results
+
+    def process_query_stream(self, user_query: str, max_iterations: int = 2, conversation_id: str = "") -> Generator[Dict[str, Any], None, None]:
+        """
+        Stream orchestration events as the query is processed, and log them to Firebase.
+        """
+        for event in self._process_query_stream_internal(user_query, max_iterations):
+            if conversation_id:
+                try:
+                    from firebase_helper import log_orchestration_event
+                    # Copy the event to avoid mutating the yielded object
+                    log_orchestration_event(conversation_id, dict(event))
+                except Exception as e:
+                    self.logger.error(f"Error logging event to Firebase: {e}")
+            yield event
+
+    def _process_query_stream_internal(self, user_query: str, max_iterations: int = 2) -> Generator[Dict[str, Any], None, None]:
+        """
+        Internal generator for streaming orchestration events.
+        """
+        start_time = time.time()
+        session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        yield {"type": "session_started", "sessionId": session_id, "query": user_query}
+        
+        # Optimistic feedback: Let the user know the neural link is active
+        yield {"type": "thought", "content": "Initializing neural orchestration pipeline..."}
+
+        try:
+            # --- Phase 1: Planning ---
+            yield {"type": "planner_started"}
+            # Start planning in parallel with a small delay for UI effect if needed, 
+            # but here we want SPEED.
+            plan = self.planner.create_plan(user_query, orchestrator=self)
+            plan_explanation = self.planner.explain_plan(plan)
+            yield {
+                "type": "planner_completed",
+                "plan": {
+                    "pipeline": plan.get("pipeline", []),
+                    "reasoning": plan.get("reasoning", ""),
+                },
+                "explanation": plan_explanation,
+            }
+
+            # --- Phase 2: Adversarial verification loop ---
+            yield {"type": "verifier_started"}
+            iteration = 0
+            verification = None
+            verifier_feedback = None
+
+            while iteration < max_iterations:
+                iteration += 1
+                verification = self.verifier.verify_plan(plan)
+                verifier_feedback = self.verifier.generate_feedback(verification)
+                score = verification.get("score", 0)
+                approved = verification.get("overall_approval", False)
+
+                yield {
+                    "type": "verifier_iteration",
+                    "iteration": iteration,
+                    "score": score,
+                    "approved": approved,
+                    "issues": len(verification.get("issues", [])),
+                }
+
+                if approved:
+                    break
+
+                if iteration < max_iterations:
+                    try:
+                        plan = self.planner.create_plan_with_feedback(
+                            user_query=user_query,
+                            previous_plan=plan,
+                            feedback=verifier_feedback,
+                            issues=verification.get("issues", []),
+                            suggestions=verification.get("suggestions", []),
+                            score=score,
+                        )
+                        plan_explanation = self.planner.explain_plan(plan)
+                    except Exception:
+                        break
+
+            final_score = verification.get("score", 0) if verification else 0
+            final_approval = verification.get("overall_approval", False) if verification else False
+            yield {
+                "type": "verifier_completed",
+                "score": final_score,
+                "approved": final_approval,
+            }
+
+            # --- Phase 3: Tool execution ---
+            if not final_approval and final_score < 50:
+                yield {
+                    "type": "error",
+                    "message": f"Plan quality too low ({final_score}/100). Execution aborted.",
+                }
+                return
+
+            pipeline = plan.get("pipeline", [])
+            execution_results = []
+            
+            # OPTIMIZATION: Execute independent tools in parallel
+            # For now, we'll keep it simple but use a ThreadPool for the tools
+            from concurrent.futures import ThreadPoolExecutor
+            
+            with ThreadPoolExecutor(max_workers=min(len(pipeline), 4)) as executor:
+                futures = []
+                for step_num, step in enumerate(pipeline, 1):
+                    tool_name = step.get("tool", "")
+                    
+                    # Note: qa_engine usually needs context from others, so it must be sequential
+                    # We'll execute others in parallel and then do qa_engine
+                    if tool_name == "qa_engine":
+                        continue
+                        
+                    yield {
+                        "type": "tool_started",
+                        "step": step_num,
+                        "totalSteps": len(pipeline),
+                        "tool": tool_name,
+                        "purpose": step.get("purpose", ""),
+                    }
+                    
+                    def run_tool(s_num, s_data):
+                        t_name = s_data.get("tool", "")
+                        t_input = s_data.get("input", "")
+                        try:
+                            t0 = time.time()
+                            t_output = self.tools[t_name](t_input)
+                            return {"step": s_num, "tool": t_name, "status": "success",
+                                    "execution_time": time.time() - t0, "output": t_output,
+                                    "input": t_input, "purpose": s_data.get("purpose", "")}
+                        except Exception as e:
+                            return {"step": s_num, "tool": t_name, "status": "error",
+                                    "error": str(e), "output": ""}
+
+                    futures.append(executor.submit(run_tool, step_num, step))
+
+                # Gather parallel results
+                for future in futures:
+                    res = future.result()
+                    execution_results.append(res)
+                    yield {
+                        "type": "tool_completed",
+                        "step": res["step"],
+                        "tool": res["tool"],
+                        "status": res["status"],
+                        "executionTime": res.get("execution_time", 0),
+                        "outputPreview": str(res.get("output", ""))[:200],
+                    }
+
+                # Now handle qa_engine if present
+                for step_num, step in enumerate(pipeline, 1):
+                    if step.get("tool") == "qa_engine":
+                        yield {
+                            "type": "tool_started",
+                            "step": step_num,
+                            "totalSteps": len(pipeline),
+                            "tool": "qa_engine",
+                            "purpose": step.get("purpose", ""),
+                        }
+                        
+                        tool_input = step.get("input", "")
+                        # Context accumulation
+                        context_parts = []
+                        for prev in execution_results:
+                            if prev.get("status") == "success":
+                                out = prev.get("output", "")
+                                if out and len(str(out)) > 10:
+                                    context_parts.append(f"[{prev.get('tool','')}]: {out}")
+                        if context_parts:
+                            tool_input = f"{tool_input}|||CONTEXT:{''.join(context_parts)}"
+                        
+                        try:
+                            t0 = time.time()
+                            output = self.tools["qa_engine"](tool_input)
+                            res = {"step": step_num, "tool": "qa_engine", "status": "success",
+                                   "execution_time": time.time() - t0, "output": output,
+                                   "input": step.get("input", ""), "purpose": step.get("purpose", "")}
+                        except Exception as e:
+                            res = {"step": step_num, "tool": "qa_engine", "status": "error",
+                                   "error": str(e), "output": ""}
+                        
+                        execution_results.append(res)
+                        yield {
+                            "type": "tool_completed",
+                            "step": res["step"],
+                            "tool": "qa_engine",
+                            "status": res["status"],
+                            "executionTime": res.get("execution_time", 0),
+                            "outputPreview": str(res.get("output", ""))[:200],
+                        }
+
+            # --- Phase 4: Synthesis with token streaming ---
+            yield {"type": "synthesis_started"}
+
+            # Build synthesis prompt from accumulated results
+            from llm_client import llm_client
+            context_parts = []
+            for r in execution_results:
+                if r.get("status") == "success" and r.get("output"):
+                    context_parts.append(f"[{r['tool']}]: {str(r['output'])[:1500]}")
+
+            synthesis_prompt = (
+                f"You are DualMind, an advanced multi-agent AI system. "
+                f"Synthesize a comprehensive, well-structured markdown answer to the user's query.\n\n"
+                f"**User Query:** {user_query}\n\n"
+                f"**Research Data from Tool Pipeline:**\n{'---'.join(context_parts)}\n\n"
+                f"Provide a thorough, well-formatted answer using markdown headings, bullet points, "
+                f"and bold text. Be authoritative and helpful."
+            )
+
+            token_buffer = ""
+            for token in llm_client.call_llm_stream(synthesis_prompt, max_tokens=2000):
+                token_buffer += token
+                yield {"type": "token", "content": token}
+
+            # Fallback if streaming produced nothing
+            if not token_buffer.strip():
+                from synthesizer import synthesize_answer
+                fallback = synthesize_answer(user_query, execution_results, plan)
+                if fallback:
+                    token_buffer = fallback
+                    yield {"type": "token", "content": fallback}
+
+            yield {"type": "synthesis_completed"}
+
+            # --- Done ---
+            total_time = time.time() - start_time
+            yield {
+                "type": "completed",
+                "sessionId": session_id,
+                "executionTime": round(total_time, 2),
+                "toolsExecuted": len(execution_results),
+                "successCount": sum(1 for r in execution_results if r.get("status") == "success"),
+            }
+
+        except Exception as exc:
+            self.logger.error(f"Streaming orchestration error: {exc}")
+            yield {"type": "error", "message": str(exc)}
 
     def _execute_pipeline_with_selfcorrection(self, plan: Dict[str, Any], user_query: str, max_retries: int = 2) -> List[Dict[str, Any]]:
         """Execute pipeline with self-correction capability."""

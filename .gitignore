@@ -1,5 +1,71 @@
+# =========================
+# ENV / SECRETS
+# =========================
 .env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# Firebase service accounts
+firebase-service-account.json
+serviceAccountKey.json
+
+# =========================
+# PYTHON
+# =========================
 __pycache__/
-*.pyc
-logs/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv/
 venv/
+env/
+
+# Logs
+*.log
+logs/
+
+# =========================
+# NODE / NEXTJS
+# =========================
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Package managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# =========================
+# OS / EDITOR
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =========================
+# CACHE / TEMP
+# =========================
+.cache/
+tmp/
+temp/
+*.tmp
+
+# =========================
+# TESTS / COVERAGE
+# =========================
+coverage/
+.pytest_cache/
+
+# =========================
+# MISC
+# =========================
+*.sqlite
+*.db
