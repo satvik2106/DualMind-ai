@@ -13,5 +13,5 @@ openai
 firebase-admin
 gunicorn
 uvicorn[standard]
-fpdf
 matplotlib
+fpdf2
