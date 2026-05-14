@@ -364,14 +364,13 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png"}
 ALLOWED_PDF_TYPES = {"application/pdf"}
 
 
-@app.get("/")
-async def root() -> dict:
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
     """Root endpoint for Render health checks and frontend connectivity validation."""
     return {
         "status": "online",
-        "service": "DualMind Orchestration API",
-        "version": "1.0.0",
-        "streaming": True,
+        "service": "DualMind API",
+        "streaming": True
     }
 
 
