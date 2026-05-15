@@ -1,19 +1,13 @@
 /**
- * Zustand state management for the DualMind chat experience.
- *
- * Manages messages, orchestration state, agent status, and tool records.
- * All streaming events from the SSE client dispatch actions on this store.
+ * Zustand state management for the DualMind AI OS workspace.
+ * Manages messages, artifacts, workspace mode, and realtime cognitive events.
  */
 
 import { create } from 'zustand';
-import type {
-  AgentState,
-  PlanPayload,
-  ToolRecord,
-} from '@/types/streaming';
+import type { AgentState, PlanPayload, ToolRecord } from '@/types/streaming';
 
 // ---------------------------------------------------------------------------
-// Message model
+// Models
 // ---------------------------------------------------------------------------
 
 export interface ChatMessage {
@@ -21,19 +15,27 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   status: 'pending' | 'streaming' | 'complete' | 'error';
-  /** Accumulated tool records for this response */
   toolRecords: ToolRecord[];
-  /** Plan produced by the orchestrator */
   plan?: PlanPayload;
-  /** Verifier score */
   verifierScore?: number;
-  /** Total execution time (seconds) */
   executionTime?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Default agent list — matches the DualMind orchestrator pipeline
-// ---------------------------------------------------------------------------
+export interface ArtifactData {
+  id: string;
+  type: string;
+  title: string;
+  url?: string; // If rendering via iframe
+}
+
+export interface CognitiveEvent {
+  id: string;
+  timestamp: number;
+  type: string;
+  content?: string;
+  agent?: string;
+  metadata?: any;
+}
 
 const DEFAULT_AGENTS: AgentState[] = [
   { name: 'planner',     label: 'Planner',     status: 'idle' },
@@ -41,6 +43,7 @@ const DEFAULT_AGENTS: AgentState[] = [
   { name: 'researcher',  label: 'Researcher',  status: 'idle' },
   { name: 'coder',       label: 'Coder',       status: 'idle' },
   { name: 'synthesizer', label: 'Synthesizer', status: 'idle' },
+  { name: 'visualizer',  label: 'Visualizer',  status: 'idle' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -48,7 +51,15 @@ const DEFAULT_AGENTS: AgentState[] = [
 // ---------------------------------------------------------------------------
 
 interface ChatStore {
-  // --- State ---
+  // --- Workspace State ---
+  isWorkspaceMode: boolean;
+  activeArtifactId: string | null;
+  artifactsList: ArtifactData[];
+  
+  // --- Cognition State ---
+  cognitiveTimeline: CognitiveEvent[];
+  
+  // --- Chat State ---
   messages: ChatMessage[];
   agents: AgentState[];
   sessionId: string | null;
@@ -56,7 +67,7 @@ interface ChatStore {
   isStreaming: boolean;
   streamStatus: 'idle' | 'connecting' | 'streaming' | 'reconnecting' | 'error';
   currentActiveTool: string | null;
-  activePhase: string | null;  // 'planning' | 'verifying' | 'executing' | 'synthesizing' | null
+  activePhase: string | null;
 
   // --- Telemetry ---
   telemetry: {
@@ -68,6 +79,11 @@ interface ChatStore {
   errorDetail: { code: string; message: string } | null;
 
   // --- Actions ---
+  toggleWorkspaceMode: (open: boolean) => void;
+  setActiveArtifact: (id: string | null, type?: string, title?: string) => void;
+  addArtifact: (artifact: ArtifactData) => void;
+  addCognitiveEvent: (event: Omit<CognitiveEvent, 'id' | 'timestamp'>) => void;
+  
   addUserMessage: (content: string) => string;
   startAssistantMessage: () => string;
   appendToken: (msgId: string, token: string) => void;
@@ -87,7 +103,6 @@ interface ChatStore {
   setStreamStatus: (status: 'idle' | 'connecting' | 'streaming' | 'reconnecting' | 'error') => void;
   setCurrentActiveTool: (tool: string | null) => void;
   setActivePhase: (phase: string | null) => void;
-  
   setTelemetry: (updates: Partial<ChatStore['telemetry']>) => void;
   setErrorDetail: (error: { code: string; message: string } | null) => void;
   
@@ -101,8 +116,14 @@ interface ChatStore {
 
 let _nextId = 0;
 const uid = () => `msg_${Date.now()}_${_nextId++}`;
+const evtId = () => `evt_${Date.now()}_${_nextId++}`;
 
 export const useChatStore = create<ChatStore>((set) => ({
+  isWorkspaceMode: false,
+  activeArtifactId: null,
+  artifactsList: [],
+  cognitiveTimeline: [],
+  
   messages: [],
   agents: DEFAULT_AGENTS.map(a => ({ ...a })),
   sessionId: null,
@@ -120,12 +141,35 @@ export const useChatStore = create<ChatStore>((set) => ({
   },
   errorDetail: null,
 
+  toggleWorkspaceMode: (open) => set({ isWorkspaceMode: open }),
+  
+  setActiveArtifact: (id, type, title) => set((s) => {
+    if (id && type && title && !s.artifactsList.find(a => a.id === id)) {
+      return { 
+        activeArtifactId: id, 
+        isWorkspaceMode: true,
+        artifactsList: [...s.artifactsList, { id, type, title }] 
+      };
+    }
+    return { activeArtifactId: id, isWorkspaceMode: !!id };
+  }),
+
+  addArtifact: (artifact) => set((s) => {
+    if (s.artifactsList.find(a => a.id === artifact.id)) return s;
+    return { artifactsList: [...s.artifactsList, artifact] };
+  }),
+
+  addCognitiveEvent: (event) => set((s) => ({
+    cognitiveTimeline: [...s.cognitiveTimeline, { ...event, id: evtId(), timestamp: Date.now() }]
+  })),
+
   addUserMessage: (content) => {
     const id = uid();
     set((s) => ({
       messages: [...s.messages, {
         id, role: 'user', content, status: 'complete', toolRecords: [],
       }],
+      cognitiveTimeline: [], // Clear timeline on new message
     }));
     return id;
   },
@@ -197,10 +241,9 @@ export const useChatStore = create<ChatStore>((set) => ({
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setCurrentActiveTool: (tool) => set({ currentActiveTool: tool }),
   setActivePhase: (phase) => set({ activePhase: phase }),
-
   setTelemetry: (updates) => set((s) => ({ telemetry: { ...s.telemetry, ...updates } })),
   setErrorDetail: (errorDetail) => set({ errorDetail }),
-
+  
   setMessages: (messages) => set({ messages }),
   clearMessages: () =>
     set({
@@ -211,12 +254,11 @@ export const useChatStore = create<ChatStore>((set) => ({
       activePhase: null,
       currentActiveTool: null,
       streamStatus: 'idle',
-      telemetry: {
-        tokensPerSecond: 0,
-        latency: 0,
-        totalTokens: 0,
-        model: 'Neural Engine v3.1',
-      },
+      cognitiveTimeline: [],
+      artifactsList: [],
+      activeArtifactId: null,
+      isWorkspaceMode: false,
+      telemetry: { tokensPerSecond: 0, latency: 0, totalTokens: 0, model: 'Neural Engine v3.1' },
       errorDetail: null,
     }),
 }));

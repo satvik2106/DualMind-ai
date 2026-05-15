@@ -153,12 +153,36 @@ export async function streamChat(message: string): Promise<void> {
 // Event dispatcher — translates SSE events into Zustand mutations
 // ---------------------------------------------------------------------------
 
-function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
+function dispatchEvent(assistantId: string, event: any): void {
   const s = useChatStore.getState();
 
+  // 1. Add to the unified cognitive timeline for the cinematic visualization
+  if (
+    event.type !== 'token' && 
+    event.type !== 'session_started' && 
+    event.type !== 'completed' &&
+    event.type !== 'error'
+  ) {
+    s.addCognitiveEvent({
+      type: event.type,
+      content: event.content || event.purpose || event.tool || event.agent || '',
+      agent: event.agent || TOOL_TO_AGENT[event.tool] || undefined,
+      metadata: event,
+    });
+  }
+
+  // 2. Handle specific state mutations
   switch (event.type) {
     case 'session_started':
       s.setSessionId(event.sessionId);
+      break;
+
+    case 'agent_thinking':
+      s.setAgentStatus(event.agent || 'planner', 'active', event.content);
+      break;
+
+    case 'memory_recall':
+      s.setAgentStatus('planner', 'active', event.content);
       break;
 
     case 'planner_started':
@@ -168,7 +192,9 @@ function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
 
     case 'planner_completed':
       s.setAgentStatus('planner', 'completed');
-      s.setMessagePlan(assistantId, event.plan);
+      if (event.plan) {
+        s.setMessagePlan(assistantId, event.plan);
+      }
       break;
 
     case 'verifier_started':
@@ -176,8 +202,8 @@ function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
       s.setAgentStatus('verifier', 'active');
       break;
 
-    case 'verifier_iteration':
-      s.setAgentStatus('verifier', 'active', `Score: ${event.score}/100`);
+    case 'verification_critique':
+      s.setAgentStatus('verifier', 'active', `Critique: ${event.score}/100`);
       break;
 
     case 'verifier_completed':
@@ -188,7 +214,6 @@ function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
     case 'tool_started': {
       s.setActivePhase('executing');
       s.setCurrentActiveTool(event.tool);
-      // Activate the matching agent
       const agentName = TOOL_TO_AGENT[event.tool] || 'researcher';
       s.setAgentStatus(agentName, 'active', event.purpose);
       s.addToolRecord(assistantId, {
@@ -214,20 +239,31 @@ function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
       break;
     }
 
+    case 'confidence_update':
+      // The DAG engine emits this as parallel execution resolves
+      s.setAgentStatus('analyst', 'active', `Confidence: ${(event.overall * 100).toFixed(0)}%`);
+      break;
+
     case 'synthesis_started':
       s.setActivePhase('synthesizing');
       s.setAgentStatus('synthesizer', 'active');
       break;
 
-    case 'thought':
-      // Immediately show a thought block or update status
-      s.setAgentStatus('planner', 'active', event.content);
+    case 'artifact_generating':
+      s.setAgentStatus('synthesizer', 'active', 'Generating layout...');
+      break;
+
+    case 'chart_rendering':
+      s.setAgentStatus('visualizer', 'active', 'Rendering charts...');
+      break;
+
+    case 'artifact_generated':
+      // Artifact created on the backend — Auto-open it in the workspace!
+      s.setAgentStatus('visualizer', 'completed');
+      s.setActiveArtifact(event.artifactId, event.artifactType, event.title);
       break;
 
     case 'token':
-      // Token Batching Optimization
-      // We collect tokens in a local buffer and flush them using RequestAnimationFrame
-      // to ensure smooth rendering and zero UI freezing.
       if (!(window as any)._tokenBuffer) {
         (window as any)._tokenBuffer = '';
         (window as any)._tokenMsgId = assistantId;
@@ -256,10 +292,9 @@ function dispatchEvent(assistantId: string, event: OrchestrationEvent): void {
       s.setMessageStatus(assistantId, 'complete');
       s.setMessageExecutionTime(assistantId, event.executionTime);
       s.setActivePhase(null);
-      // Update global telemetry with final stats
       s.setTelemetry({ 
         totalTokens: useChatStore.getState().telemetry.totalTokens,
-        tokensPerSecond: Number((useChatStore.getState().telemetry.totalTokens / event.executionTime).toFixed(1))
+        tokensPerSecond: Number((useChatStore.getState().telemetry.totalTokens / Math.max(event.executionTime, 0.1)).toFixed(1))
       });
       break;
 

@@ -1,520 +1,269 @@
-
 """
-Orchestrator Module
-Coordinates Planner, Verifier, and tool execution in the DualMind system.
+DualMind AI OS — Cognitive Orchestrator
+The central intelligence coordinator that integrates:
+- Semantic Memory (cross-session recall)
+- DAG Execution Engine (parallel, branching workflows)
+- Specialized Agent Ecosystem (planner, researcher, synthesizer, verifier)
+- Artifact System (Claude-style reports, charts, dashboards)
+- Live Cognitive Streaming (SSE events for visible thinking)
+- Model Router (env-driven specialized model routing)
 """
 
 import json
 import logging
 import time
 import os
+import re
 from typing import Dict, Any, Generator, List, Optional
 from datetime import datetime
 
-class Orchestrator:
+logger = logging.getLogger(__name__)
+
+
+class CognitiveOrchestrator:
     """
-    Central coordinator for the DualMind Orchestrator system.
-    Manages the interaction between Planner, Verifier, and tool execution.
+    DualMind AI Operating System — Core Orchestrator.
+
+    Replaces the old linear pipeline with a DAG-based execution engine
+    backed by semantic memory and specialized cognitive agents.
     """
 
-    def __init__(self, tools_dir: str = "tools", logs_dir: str = "logs"):
-        """
-        Initialize the Orchestrator.
-
-        Args:
-            tools_dir (str): Directory containing tool modules
-            logs_dir (str): Directory for storing logs
-        """
-        self.tools_dir = tools_dir
-        self.logs_dir = logs_dir
-        self.logger = logging.getLogger(__name__)
-
-        # Tools whose failure should not block the entire pipeline
-        self.non_critical_tools = ["wikipedia_search"]
-
-        # Create directories if they don't exist
-        for directory in [tools_dir, logs_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-
-        # Import tools dynamically
+    def __init__(self):
+        self.logger = logging.getLogger("dualmind.orchestrator")
         self.tools = self._load_tools()
 
-        # Initialize components
-        from planner import create_planner
-        from verifier import create_verifier
+        # Initialize subsystems lazily
+        self._router = None
+        self._memory = None
+        self._artifact_manager = None
+        self._agents_ready = False
 
-        self.planner = create_planner()
-        self.verifier = create_verifier()
+        # Non-critical tools whose failure won't block execution
+        self.non_critical_tools = {"wikipedia_search", "news_fetcher", "sentiment_analyzer"}
 
-        # Execution state
-        self.execution_history = []
+        self.logger.info(f"CognitiveOrchestrator initialized — {len(self.tools)} tools loaded")
 
-    def _preprocess_query(self, raw_query: str) -> Dict[str, Any]:
-        """
-        Use the LLM to normalize the query, fix typos, and extract intent.
-        
-        Returns:
-            Dict[str, Any]: {
-                "cleaned_query": "normalized query",
-                "search_terms": "keyword optimized for tools",
-                "intent": "research|report|code|analysis|brainstorm",
-                "detected_typos": True/False
-            }
-        """
-        self.logger.info(f"Preprocessing query: {raw_query}")
-        
-        try:
-            from llm_client import llm_client
-            
-            system_prompt = """You are the DualMind Semantic Processor.
-Your task is to analyze raw user queries and extract structured intent.
+    # ── Lazy Subsystem Access ────────────────────────────────────────
 
-1. Fix any spelling or grammar errors (e.g., 'summarisze' -> 'summarize').
-2. Extract the core search terms for research tools (ArXiv, Wikipedia).
-3. Classify the intent into one of: 
-   - research_report (comprehensive summary)
-   - technical_explanation (how things work)
-   - coding_task (implementation/programming)
-   - market_analysis (trends/companies)
-   - visualization_request (charts/graphs)
-   - brainstorming (ideas/creativity)
+    @property
+    def router(self):
+        if self._router is None:
+            from model_router import get_router
+            self._router = get_router()
+        return self._router
 
-Respond ONLY with a JSON object:
-{
-  "cleaned_query": "the corrected query",
-  "search_terms": "optimized search keywords",
-  "intent": "category",
-  "is_complex": true/false
-}"""
-            
-            response = llm_client.call_llm(
-                prompt=f"Raw Query: {raw_query}",
-                system_prompt=system_prompt,
-                require_json=True,
-                max_tokens=300
-            )
-            
-            if response and isinstance(response, dict):
-                self.logger.info(f"Query preprocessed: {response.get('cleaned_query')}")
-                return response
-                
-        except Exception as e:
-            self.logger.warning(f"Preprocessing failed, using raw query: {e}")
-            
-        # Fallback if LLM fails
-        return {
-            "cleaned_query": raw_query,
-            "search_terms": raw_query[:100],
-            "intent": "research_report",
-            "is_complex": False
-        }
+    @property
+    def memory(self):
+        if self._memory is None:
+            try:
+                from memory.semantic_memory import get_memory
+                self._memory = get_memory()
+            except Exception as e:
+                self.logger.warning(f"Memory engine unavailable: {e}")
+                self._memory = None
+        return self._memory
+
+    @property
+    def artifacts(self):
+        if self._artifact_manager is None:
+            from artifacts.artifact_manager import get_artifact_manager
+            self._artifact_manager = get_artifact_manager()
+        return self._artifact_manager
 
     def _load_tools(self) -> Dict[str, Any]:
-        """Load and prepare tool functions for execution."""
+        """Load all tool functions dynamically."""
         tools = {}
-
-        try:
-            # Import all tool modules
-            tool_files = [
-                'arxiv_summarizer', 'semantic_scholar', 'pubmed_search', 'pdf_parser',
-                'wikipedia_search', 'news_fetcher',
-                'sentiment_analyzer', 'data_plotter', 'qa_engine', 'document_writer'
-            ]
-
-            for tool_name in tool_files:
-                try:
-                    # Dynamically import the tool module
-                    module = __import__(f"tools.{tool_name}", fromlist=[f"{tool_name}_tool"])
-
-                    # Get the tool function
-                    tool_function = getattr(module, f"{tool_name}_tool")
-                    tools[tool_name] = tool_function
-
-                except ImportError as e:
-                    self.logger.warning(f"Could not import tool {tool_name}: {e}")
-                except AttributeError as e:
-                    self.logger.warning(f"Tool function not found in {tool_name}: {e}")
-
-        except Exception as e:
-            self.logger.error(f"Error loading tools: {e}")
-
+        tool_files = [
+            'arxiv_summarizer', 'semantic_scholar', 'pubmed_search', 'pdf_parser',
+            'wikipedia_search', 'news_fetcher', 'sentiment_analyzer',
+            'data_plotter', 'qa_engine', 'document_writer',
+            'web_search', 'web_scraper',
+        ]
+        for tool_name in tool_files:
+            try:
+                module = __import__(f"tools.{tool_name}", fromlist=[f"{tool_name}_tool"])
+                tool_function = getattr(module, f"{tool_name}_tool")
+                tools[tool_name] = tool_function
+            except (ImportError, AttributeError) as e:
+                self.logger.warning(f"Tool {tool_name} unavailable: {e}")
         return tools
 
-    def process_query(self, user_query: str, max_iterations: int = 2) -> Dict[str, Any]:
+    # ══════════════════════════════════════════════════════════════════
+    #  MAIN STREAMING ENDPOINT — The core intelligence pipeline
+    # ══════════════════════════════════════════════════════════════════
+
+    def process_query_stream(
+        self,
+        user_query: str,
+        max_iterations: int = 2,
+        conversation_id: str = "",
+    ) -> Generator[Dict[str, Any], None, None]:
         """
-        Process a user query through the complete DualMind pipeline with semantic intelligence.
-        """
-        start_time = time.time()
-        session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        Process a query through the full AI OS pipeline, yielding SSE events.
 
-        self.logger.info(f"Starting new session: {session_id}")
-        
-        # Phase 0: Preprocessing
-        preprocessed = self._preprocess_query(user_query)
-        cleaned_query = preprocessed.get("cleaned_query", user_query)
-        search_terms = preprocessed.get("search_terms", user_query)
-
-        try:
-            # Phase 1: Initial Planning with cleaned query
-            self.logger.info(f"Phase 1: Generating plan for: {cleaned_query} (Intent: {intent})")
-            plan = self.planner.create_plan(cleaned_query, orchestrator=self, intent=intent)
-            plan_explanation = self.planner.explain_plan(plan)
-
-            # Phase 2: Adversarial Loop
-            self.logger.info("Phase 2: Entering adversarial verification loop...")
-            iteration = 0
-            verification = None
-            verifier_feedback = None
-            plan_history = [{"iteration": 0, "plan": plan.copy(), "score": 0}]
-            
-            while iteration < max_iterations:
-                iteration += 1
-                self.logger.info(f"🔄 Adversarial iteration {iteration}/{max_iterations}")
-
-                # Verify the current plan
-                verification = self.verifier.verify_plan(plan)
-                verifier_feedback = self.verifier.generate_feedback(verification)
-                score = verification.get("score", 0)
-                approved = verification.get("overall_approval", False)
-                
-                # Log verification results
-                self.logger.info(f"Verification score: {score}/100, Approved: {approved}")
-                
-                # Store plan in history
-                plan_history.append({
-                    "iteration": iteration,
-                    "plan": plan.copy(),
-                    "score": score,
-                    "approved": approved
-                })
-
-                # Check if plan is approved
-                if approved:
-                    self.logger.info(f"✅ Plan approved by verifier (score: {score}/100)")
-                    break
-
-                # Plan needs improvement - regenerate with feedback
-                self.logger.warning(f"❌ Plan rejected (score: {score}/100)")
-                
-                if iteration < max_iterations:
-                    # Extract feedback details
-                    issues = verification.get("issues", [])
-                    suggestions = verification.get("suggestions", [])
-                    
-                    self.logger.info(f"Issues: {len(issues)}, Suggestions: {len(suggestions)}")
-                    self.logger.info("🔧 Regenerating plan with verifier feedback...")
-                    
-                    # CRITICAL: Actually regenerate the plan with feedback
-                    try:
-                        plan = self.planner.create_plan_with_feedback(
-                            user_query=cleaned_query,
-                            previous_plan=plan,
-                            feedback=verifier_feedback,
-                            issues=issues,
-                            suggestions=suggestions,
-                            score=score
-                        )
-                        
-                        # Update explanation for the new plan
-                        plan_explanation = self.planner.explain_plan(plan)
-                        self.logger.info(f"✨ Generated improved plan (revision {plan.get('revision_number', iteration)})")
-                        
-                    except Exception as e:
-                        self.logger.error(f"Failed to regenerate plan: {e}")
-                        self.logger.warning("Proceeding with previous plan")
-                        break
-                else:
-                    self.logger.warning(f"⚠️ Max iterations ({max_iterations}) reached without approval")
-
-            # Determine if we should proceed with execution
-            final_score = verification.get("score", 0) if verification else 0
-            final_approval = verification.get("overall_approval", False) if verification else False
-            
-            # Phase 3: Execution Decision with Self-Correction Support
-            if not final_approval and final_score < 50:
-                # Plan is too bad to execute
-                self.logger.error(f"Plan quality too low (score: {final_score}/100). Refusing to execute.")
-                error_results = {
-                    "session_id": session_id,
-                    "user_query": user_query,
-                    "execution_time": time.time() - start_time,
-                    "iterations": iteration,
-                    "plan": plan,
-                    "plan_history": plan_history,
-                    "verification": verification,
-                    "verifier_feedback": verifier_feedback,
-                    "error": f"Plan quality insufficient (score: {final_score}/100). Cannot proceed with execution.",
-                    "status": "rejected_by_verifier"
-                }
-                self._log_session(error_results)
-                return error_results
-            
-            # Execute the plan (either approved or acceptable quality)
-            if final_approval:
-                self.logger.info("Phase 3: Executing approved task pipeline...")
-            else:
-                self.logger.warning(f"Phase 3: Executing plan with warnings (score: {final_score}/100)...")
-            
-            execution_results = self._execute_pipeline_with_selfcorrection(plan, cleaned_query, search_terms=search_terms, max_retries=2)
-
-            # Phase 4: Final verification
-            self.logger.info("Phase 4: Final verification of results...")
-            final_verification = self.verifier.verify_plan({
-                "query": user_query,
-                "pipeline": plan.get("pipeline", []),
-                "results": execution_results
-            })
-
-            # Compile complete results
-            total_time = time.time() - start_time
-
-            results = {
-                "session_id": session_id,
-                "user_query": user_query,
-                "execution_time": total_time,
-                "iterations": iteration,
-                "plan": plan,
-                "plan_history": plan_history,  # Track evolution of plans through iterations
-                "plan_explanation": plan_explanation,
-                "verification": verification,
-                "verifier_feedback": verifier_feedback,
-                "execution_results": execution_results,
-                "final_verification": final_verification,
-                "status": "completed" if verification.get("overall_approval", False) else "completed_with_issues",
-                "adversarial_loop_active": True,
-                "final_plan_score": final_score,
-                "plan_approved": final_approval,
-                "self_correction_used": execution_results[0].get("retry_count", 0) > 0 if execution_results else False
-            }
-
-            # Log the session for learning/adaptation
-            self._log_session(results)
-            
-            # Store successful plan patterns for learning
-            if final_approval and len(execution_results) > 0:
-                success_count = sum(1 for r in execution_results if r.get('status') == 'success')
-                if success_count >= len(execution_results) * 0.8:  # 80% success rate
-                    self._store_successful_plan_pattern(user_query, plan, final_score)
-
-            return results
-
-        except Exception as e:
-            self.logger.error(f"Error in query processing: {e}")
-
-            # Return error results
-            error_results = {
-                "session_id": session_id,
-                "user_query": user_query,
-                "execution_time": time.time() - start_time,
-                "error": str(e),
-                "status": "error"
-            }
-
-            self._log_session(error_results)
-            return error_results
-
-    def process_query_stream(self, user_query: str, max_iterations: int = 2, conversation_id: str = "") -> Generator[Dict[str, Any], None, None]:
-        """
-        Stream orchestration events as the query is processed, and log them to Firebase.
-        """
-        for event in self._process_query_stream_internal(user_query, max_iterations):
-            if conversation_id:
-                try:
-                    from firebase_helper import log_orchestration_event
-                    # Copy the event to avoid mutating the yielded object
-                    log_orchestration_event(conversation_id, dict(event))
-                except Exception as e:
-                    self.logger.error(f"Error logging event to Firebase: {e}")
-            yield event
-
-    def _process_query_stream_internal(self, user_query: str, max_iterations: int = 2) -> Generator[Dict[str, Any], None, None]:
-        """
-        Internal generator for streaming orchestration events with semantic intelligence.
+        Pipeline:
+        1. Memory Recall — check for cross-session context
+        2. Semantic Preprocessing — intent classification + search strategy
+        3. Agent-Based Planning — DAG construction via Planner Agent
+        4. Adversarial Verification — Verifier Agent critiques plan
+        5. DAG Execution — Parallel tool execution with confidence scoring
+        6. Research Synthesis — Researcher + Synthesizer agents
+        7. Artifact Generation — HTML report with charts
+        8. Memory Storage — persist interaction for future recall
         """
         start_time = time.time()
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         yield {"type": "session_started", "sessionId": session_id, "query": user_query}
-        
-        # --- Phase 0: Semantic Preprocessing ---
-        yield {"type": "thought", "content": "Analyzing query semantics and intent..."}
-        preprocessed = self._preprocess_query(user_query)
-        cleaned_query = preprocessed.get("cleaned_query", user_query)
-        intent = preprocessed.get("intent", "research_report")
-        search_terms = preprocessed.get("search_terms", user_query)
-        
-        if cleaned_query != user_query:
-            yield {"type": "thought", "content": f"Normalized query: \"{cleaned_query}\" (Intent: {intent})"}
-        else:
-            yield {"type": "thought", "content": f"Neural intent identified: {intent}"}
 
         try:
-            # --- Phase 1: Planning ---
+            # ── Phase 0: Memory Recall ───────────────────────────────
+            memory_context = ""
+            if self.memory:
+                yield {"type": "memory_recall", "content": "Searching semantic memory..."}
+                try:
+                    recalls = self.memory.recall(user_query, top_k=3)
+                    if recalls:
+                        memory_context = self.memory.build_context_prompt(user_query, conversation_id)
+                        yield {
+                            "type": "memory_recall",
+                            "content": f"Found {len(recalls)} relevant memories",
+                            "memories": [
+                                {"query": r.entry.query[:80], "score": round(r.decay_adjusted_score, 2)}
+                                for r in recalls
+                            ],
+                        }
+                    else:
+                        yield {"type": "memory_recall", "content": "No prior memories found — fresh analysis"}
+                except Exception as e:
+                    self.logger.warning(f"Memory recall failed: {e}")
+
+            # ── Phase 1: Semantic Preprocessing ──────────────────────
+            yield {"type": "agent_thinking", "agent": "preprocessor", "content": "Analyzing query semantics..."}
+            preprocessed = self._preprocess_query(user_query)
+            cleaned_query = preprocessed.get("cleaned_query", user_query)
+            intent = preprocessed.get("intent", "research_report")
+            search_strategy = preprocessed.get("search_strategy", {})
+
+            # Derive search terms from strategy
+            search_terms = cleaned_query
+            all_terms = []
+            for category in ["academic", "news", "general", "data"]:
+                terms = search_strategy.get(category, [])
+                if terms:
+                    all_terms.extend(terms)
+            if all_terms:
+                search_terms = all_terms[0]  # Use the most specific term
+
+            yield {
+                "type": "agent_thinking",
+                "agent": "preprocessor",
+                "content": f"Intent: {intent} | Search focus: {search_terms[:60]}",
+            }
+
+            # ── Phase 2: Agent-Based Planning ────────────────────────
             yield {"type": "planner_started"}
-            # Use cleaned query and intent for planning
-            plan = self.planner.create_plan(cleaned_query, orchestrator=self, intent=intent)
-            plan_explanation = self.planner.explain_plan(plan)
+            yield {"type": "agent_thinking", "agent": "planner", "content": "Constructing execution DAG..."}
+
+            plan = self._generate_plan(cleaned_query, memory_context, preprocessed)
+            pipeline = plan.get("pipeline", [])
+
             yield {
                 "type": "planner_completed",
                 "plan": {
-                    "pipeline": plan.get("pipeline", []),
+                    "pipeline": pipeline,
                     "reasoning": plan.get("reasoning", ""),
                 },
-                "explanation": plan_explanation,
+                "explanation": plan.get("reasoning", "Plan generated"),
             }
 
-            # --- Phase 2: Adversarial verification loop ---
+            # ── Phase 3: Adversarial Verification ────────────────────
             yield {"type": "verifier_started"}
-            iteration = 0
-            verification = None
-            verifier_feedback = None
+            verification_result = self._verify_plan(plan, cleaned_query)
+            score = verification_result.get("score", 70)
+            approved = verification_result.get("approved", True)
 
-            while iteration < max_iterations:
-                iteration += 1
-                verification = self.verifier.verify_plan(plan)
-                verifier_feedback = self.verifier.generate_feedback(verification)
-                score = verification.get("score", 0)
-                approved = verification.get("overall_approval", False)
+            yield {
+                "type": "verification_critique",
+                "score": score,
+                "approved": approved,
+                "issues": verification_result.get("issues", []),
+            }
 
-                yield {
-                    "type": "verifier_iteration",
-                    "iteration": iteration,
-                    "score": score,
-                    "approved": approved,
-                    "issues": len(verification.get("issues", [])),
-                }
-
-                if approved:
-                    break
-
-                if iteration < max_iterations:
-                    try:
-                        plan = self.planner.create_plan_with_feedback(
-                            user_query=cleaned_query,
-                            previous_plan=plan,
-                            feedback=verifier_feedback,
-                            issues=verification.get("issues", []),
-                            suggestions=verification.get("suggestions", []),
-                            score=score,
-                        )
-                        plan_explanation = self.planner.explain_plan(plan)
-                    except Exception:
-                        break
-
-            final_score = verification.get("score", 0) if verification else 0
-            final_approval = verification.get("overall_approval", False) if verification else False
             yield {
                 "type": "verifier_completed",
-                "score": final_score,
-                "approved": final_approval,
+                "score": score,
+                "approved": approved,
             }
 
-            # --- Phase 3: Tool execution ---
-            if not final_approval and final_score < 50:
-                yield {
-                    "type": "error",
-                    "message": f"Plan quality too low ({final_score}/100). Execution aborted.",
-                }
+            if not approved and score < 40:
+                yield {"type": "error", "message": f"Plan quality too low ({score}/100). Execution aborted."}
                 return
 
-            pipeline = plan.get("pipeline", [])
+            # ── Phase 4: DAG Execution ───────────────────────────────
+            from orchestration.dag_engine import DAGExecutor
+
+            dag = DAGExecutor(self.tools, max_parallel=4)
+            dag.build_from_plan(plan, cleaned_query)
+
             execution_results = []
-            
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(len(pipeline), 4)) as executor:
-                futures = []
-                for step_num, step in enumerate(pipeline, 1):
-                    tool_name = step.get("tool", "")
-                    
-                    # INTELLIGENCE OVERHAUL: Skip redundant qa_engine in streaming mode
-                    if tool_name == "qa_engine":
-                        self.logger.info("Skipping redundant qa_engine in streaming pipeline")
-                        continue
-                        
+            for event in dag.execute(cleaned_query, search_terms):
+                # Forward DAG events as SSE
+                sse_event = event.to_sse()
+                event_type = sse_event.get("type", "")
+
+                if event_type == "node_started":
                     yield {
                         "type": "tool_started",
-                        "step": step_num,
+                        "step": sse_event.get("node_id", ""),
+                        "tool": sse_event.get("tool", ""),
+                        "purpose": sse_event.get("purpose", ""),
                         "totalSteps": len(pipeline),
-                        "tool": tool_name,
-                        "purpose": step.get("purpose", ""),
                     }
-                    
-                    def run_tool(s_num, s_data):
-                        t_name = s_data.get("tool", "")
-                        # Use search_terms for research tools
-                        t_input = s_data.get("input", cleaned_query)
-                        if t_name in ["wikipedia_search", "arxiv_summarizer", "news_fetcher", "semantic_scholar", "pubmed_search"]:
-                            t_input = search_terms
-                            
-                        try:
-                            t0 = time.time()
-                            t_output = self.tools[t_name](t_input)
-                            return {"step": s_num, "tool": t_name, "status": "success",
-                                    "execution_time": time.time() - t0, "output": t_output,
-                                    "input": t_input, "purpose": s_data.get("purpose", "")}
-                        except Exception as e:
-                            return {"step": s_num, "tool": t_name, "status": "error",
-                                    "error": str(e), "output": ""}
-
-                    futures.append(executor.submit(run_tool, step_num, step))
-
-                # Gather parallel results
-                for future in futures:
-                    res = future.result()
-                    execution_results.append(res)
+                elif event_type == "node_completed":
                     yield {
                         "type": "tool_completed",
-                        "step": res["step"],
-                        "tool": res["tool"],
-                        "status": res["status"],
-                        "executionTime": res.get("execution_time", 0),
-                        "outputPreview": str(res.get("output", ""))[:200],
+                        "step": sse_event.get("node_id", ""),
+                        "tool": sse_event.get("tool", ""),
+                        "status": "success",
+                        "confidence": sse_event.get("confidence", 0),
+                        "executionTime": sse_event.get("execution_time", 0),
+                        "outputPreview": sse_event.get("output_preview", "")[:200],
                     }
+                elif event_type == "node_failed":
+                    yield {
+                        "type": "tool_completed",
+                        "step": sse_event.get("node_id", ""),
+                        "tool": sse_event.get("tool", ""),
+                        "status": "error",
+                        "error": sse_event.get("error", ""),
+                    }
+                elif event_type == "execution_completed":
+                    exec_data = sse_event
+                    yield {"type": "confidence_update", "overall": exec_data.get("succeeded", 0) / max(exec_data.get("total", 1), 1)}
 
-            # --- Phase 4: Synthesis with token streaming ---
+            # Collect results from DAG nodes
+            for node in dag.nodes.values():
+                if node.output is not None:
+                    execution_results.append({
+                        "tool": node.tool,
+                        "status": "success" if node.status.value == "completed" else "error",
+                        "output": node.output,
+                        "confidence": node.confidence,
+                    })
+
+            # ── Phase 5: Premium Synthesis ────────────────────────────
             yield {"type": "synthesis_started"}
+            yield {"type": "agent_thinking", "agent": "synthesizer", "content": "Synthesizing executive-grade response..."}
 
-            # Build premium synthesis prompt from accumulated results
-            from llm_client import llm_client
-            context_parts = []
-            for r in execution_results:
-                if r.get("status") == "success" and r.get("output"):
-                    context_parts.append(f"### Source: {r['tool']}\n{str(r['output'])[:2000]}")
+            # Build context from all successful tool outputs
+            context = dag.get_accumulated_context()
+            if memory_context:
+                context = f"{memory_context}\n\n---\n\n{context}"
 
-            # Mode-specific instructions
-            mode_instructions = {
-                "research_report": "Focus on comprehensive coverage, technical depth, and clear section hierarchy. Use professional academic tone.",
-                "technical_explanation": "Focus on mechanics, architecture, and 'how it works'. Use analogies where helpful but maintain technical accuracy.",
-                "coding_task": "Prioritize code blocks, implementation details, and step-by-step logic. Ensure code is production-grade.",
-                "market_analysis": "Focus on companies, trends, statistics, and competitive landscape. Use business-analytical tone.",
-                "visualization_request": "Structure data clearly and provide insights that can be graphed. Suggest specific chart types.",
-                "brainstorming": "Focus on creativity, diversity of ideas, and out-of-the-box thinking. Use an inspiring, lateral-thinking tone."
-            }
-
-            synthesis_prompt = f"""You are DualMind, a premium AGI Research Operating System.
-Your task is to synthesize a world-class response for the following query.
-
-**User Query:** {cleaned_query}
-**Detected Intent:** {intent}
-
-{mode_instructions.get(intent, mode_instructions["research_report"])}
-
-### RESEARCH DATA FROM ORCHESTRATION PIPELINE:
-{'---'.join(context_parts)}
-
-### SYNTHESIS REQUIREMENTS:
-1. **Premium Quality**: Avoid generic AI boilerplate ("Here is a summary", "In conclusion"). Start directly with high-signal insights.
-2. **Structural Excellence**: Use clear Markdown hierarchy (##, ###). Use bolding for key terms.
-3. **Source Grounding**: Refer to findings from the specific tools (e.g., "According to ArXiv research...", "Recent news indicates...").
-4. **No Placeholders**: Do not use "fake" data. If info is missing, acknowledge the gap intelligently.
-5. **Concise but Deep**: Every sentence must provide value. Avoid wordiness.
-6. **Report Style**: For reports, use a professional executive summary followed by detailed sections.
-
-Respond as the DualMind OS core:"""
-
+            # Stream synthesis tokens
             token_buffer = ""
-            for token in llm_client.call_llm_stream(synthesis_prompt, max_tokens=3000):
+            for token in self._stream_synthesis(cleaned_query, context, intent):
                 token_buffer += token
                 yield {"type": "token", "content": token}
 
@@ -528,7 +277,64 @@ Respond as the DualMind OS core:"""
 
             yield {"type": "synthesis_completed"}
 
-            # --- Done ---
+            # ── Phase 6: Artifact Generation ─────────────────────────
+            try:
+                yield {"type": "artifact_generating", "content": "Creating interactive report..."}
+
+                # Extract citations from tool outputs
+                citations = self._extract_citations(execution_results)
+
+                # Generate chart data if visualization was requested
+                charts = []
+                if preprocessed.get("visualization_required", False):
+                    yield {"type": "chart_rendering", "content": "Generating interactive charts..."}
+                    charts = self._generate_charts(cleaned_query, context)
+
+                # Create the artifact
+                artifact = self.artifacts.create_report(
+                    title=self._generate_title(cleaned_query),
+                    content_html=self._markdown_to_html(token_buffer),
+                    query=cleaned_query,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    charts=charts,
+                    citations=citations,
+                    confidence=score / 100.0,
+                    agent_contributions={
+                        "Planner": "Designed research strategy",
+                        "Researcher": f"Executed {len(execution_results)} tools",
+                        "Synthesizer": "Produced executive report",
+                        "Verifier": f"Quality score: {score}/100",
+                    },
+                )
+
+                yield {
+                    "type": "artifact_generated",
+                    "artifactId": artifact.id,
+                    "artifactType": artifact.type.value,
+                    "title": artifact.title,
+                }
+
+            except Exception as e:
+                self.logger.error(f"Artifact generation failed: {e}")
+
+            # ── Phase 7: Memory Storage ──────────────────────────────
+            if self.memory:
+                try:
+                    tools_used = [r["tool"] for r in execution_results if r.get("status") == "success"]
+                    self.memory.store(
+                        query=user_query,
+                        response_summary=token_buffer[:500],
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        intent=intent,
+                        tools_used=tools_used,
+                        confidence=score / 100.0,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Memory storage failed: {e}")
+
+            # ── Done ─────────────────────────────────────────────────
             total_time = time.time() - start_time
             yield {
                 "type": "completed",
@@ -536,389 +342,243 @@ Respond as the DualMind OS core:"""
                 "executionTime": round(total_time, 2),
                 "toolsExecuted": len(execution_results),
                 "successCount": sum(1 for r in execution_results if r.get("status") == "success"),
+                "memoryCount": self.memory.get_memory_count() if self.memory else 0,
             }
 
         except Exception as exc:
-            self.logger.error(f"Streaming orchestration error: {exc}")
+            self.logger.error(f"Orchestration error: {exc}", exc_info=True)
             yield {"type": "error", "message": str(exc)}
 
-    def _execute_pipeline_with_selfcorrection(self, plan: Dict[str, Any], user_query: str, search_terms: str = "", max_retries: int = 2) -> List[Dict[str, Any]]:
-        """Execute pipeline with self-correction capability."""
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                self.logger.warning(f"🔄 Self-correction attempt {attempt}/{max_retries}")
-            
-            execution_results = self._execute_pipeline(plan, search_terms=search_terms)
-            
-            # Check if execution was successful
-            # Ignore failures from non-critical tools (e.g. wikipedia_search)
-            failed_tools = [
-                r for r in execution_results
-                if r.get('status') == 'error' and r.get('tool') not in self.non_critical_tools
-            ]
-            
-            if not failed_tools:
-                # All tools succeeded
-                return execution_results
-            
-            # Self-correction: analyze failures and retry with modified plan
-            if attempt < max_retries:
-                self.logger.warning(f"❌ {len(failed_tools)} tool(s) failed. Attempting self-correction...")
-                
-                # Create corrected plan
-                try:
-                    plan = self._create_corrected_plan(plan, failed_tools, user_query)
-                    self.logger.info("✨ Generated corrected plan, retrying...")
-                except Exception as e:
-                    self.logger.error(f"Failed to create corrected plan: {e}")
-                    break
-            else:
-                self.logger.error(f"⚠️ Max retries reached. Returning results with {len(failed_tools)} failures.")
-        
-        # Mark results with retry information
-        for result in execution_results:
-            result["retry_count"] = attempt
-        
-        return execution_results
-    
-    def _create_corrected_plan(self, plan: Dict[str, Any], failed_tools: List[Dict[str, Any]], user_query: str) -> Dict[str, Any]:
-        """Create a corrected plan based on execution failures."""
-        corrected_plan = plan.copy()
-        pipeline = list(plan.get("pipeline", []))
-        
-        # Analyze failures and apply corrections
-        for failed in failed_tools:
-            tool_name = failed.get("tool", "")
-            error = failed.get("error", "")
-            step_idx = failed.get("step", 1) - 1
-            
-            self.logger.info(f"Analyzing failure: {tool_name} - {error}")
-            
-            # Strategy 1: Tool not available -> Replace with fallback
-            if "not available" in error.lower():
-                fallback = self._get_fallback_tool(tool_name)
-                if fallback and step_idx < len(pipeline):
-                    pipeline[step_idx]["tool"] = fallback
-                    self.logger.info(f"Replaced {tool_name} with fallback: {fallback}")
-            
-            # Strategy 2: Tool failed -> Add error handling or skip
-            elif step_idx < len(pipeline):
-                # Remove the failed step if it's non-critical
-                if tool_name not in ["qa_engine", "wikipedia_search"]:
-                    pipeline.pop(step_idx)
-                    self.logger.info(f"Removed non-critical failed tool: {tool_name}")
-        
-        # Ensure qa_engine is still present
-        has_qa = any(step.get("tool") == "qa_engine" for step in pipeline)
-        if not has_qa:
-            pipeline.append({
-                "tool": "qa_engine",
-                "purpose": "Synthesize answer from available data",
-                "input": user_query
-            })
-        
-        corrected_plan["pipeline"] = pipeline
-        corrected_plan["self_corrected"] = True
-        return corrected_plan
-    
-    def _get_fallback_tool(self, tool_name: str) -> Optional[str]:
-        """Get fallback tool for a failed tool."""
-        fallback_map = {
-            "arxiv_summarizer": "wikipedia_search",
-            "news_fetcher": "wikipedia_search",
-            "data_plotter": None,  # No fallback for visualization
-            "document_writer": None,  # No fallback for document generation
-        }
-        return fallback_map.get(tool_name)
-    
-    def _execute_pipeline(self, plan: Dict[str, Any], search_terms: str = "") -> List[Dict[str, Any]]:
-        """Execute the planned tool pipeline with context accumulation."""
-        execution_results = []
-        pipeline = plan.get("pipeline", [])
+    # ══════════════════════════════════════════════════════════════════
+    #  INTERNAL METHODS
+    # ══════════════════════════════════════════════════════════════════
 
-        for step_num, step in enumerate(pipeline, 1):
-            tool_name = step.get("tool", "")
-            tool_input = step.get("input", "")
-            
-            # Context accumulation: Pass previous outputs to qa_engine
-            if tool_name == "qa_engine" and execution_results:
-                context_parts = []
-                for prev_result in execution_results:
-                    if prev_result.get("status") == "success":
-                        prev_tool = prev_result.get("tool", "")
-                        prev_output = prev_result.get("output", "")
-                        if prev_output and len(prev_output) > 10:
-                            context_parts.append(f"[{prev_tool}]: {prev_output}")
-                
-                if context_parts:
-                    context = "\n\n".join(context_parts)
-                    tool_input = f"{tool_input}|||CONTEXT:{context}"
-
-            self.logger.info(f"Executing step {step_num}: {tool_name}")
-
-            if tool_name not in self.tools:
-                result = {
-                    "step": step_num,
-                    "tool": tool_name,
-                    "status": "error",
-                    "error": f"Tool '{tool_name}' not available",
-                    "output": ""
-                }
-            else:
-                try:
-                    # INTELLIGENCE OVERHAUL: Use search_terms for research tools
-                    if search_terms and tool_name in ["wikipedia_search", "arxiv_summarizer", "news_fetcher", "semantic_scholar", "pubmed_search"]:
-                        tool_input = search_terms
-                        self.logger.info(f"Using optimized search terms for {tool_name}: {search_terms}")
-                        
-                    # Execute the tool
-                    start_time = time.time()
-                    output = self.tools[tool_name](tool_input)
-                    execution_time = time.time() - start_time
-
-                    result = {
-                        "step": step_num,
-                        "tool": tool_name,
-                        "status": "success",
-                        "execution_time": execution_time,
-                        "output": output,
-                        "input": step.get("input", ""),  # Store original input
-                        "purpose": step.get("purpose", "")
-                    }
-
-                except Exception as e:
-                    self.logger.error(f"Error executing tool {tool_name}: {e}")
-                    result = {
-                        "step": step_num,
-                        "tool": tool_name,
-                        "status": "error",
-                        "error": str(e),
-                        "output": "",
-                        "input": tool_input,
-                        "purpose": step.get("purpose", "")
-                    }
-
-            execution_results.append(result)
-
-        return execution_results
-    
-    def _store_successful_plan_pattern(self, query: str, plan: Dict[str, Any], score: int):
-        """Store successful plan patterns for learning/adaptation."""
+    def _preprocess_query(self, raw_query: str) -> Dict[str, Any]:
+        """Semantic query analysis using the planner model."""
         try:
-            # Create patterns directory if it doesn't exist
-            patterns_dir = os.path.join(self.logs_dir, "patterns")
-            if not os.path.exists(patterns_dir):
-                os.makedirs(patterns_dir)
-            
-            # Extract key features from query
-            query_features = self._extract_query_features(query)
-            
-            # Create pattern entry
-            pattern = {
-                "timestamp": datetime.now().isoformat(),
-                "query": query,
-                "query_features": query_features,
-                "plan": {
-                    "pipeline": plan.get("pipeline", []),
-                    "reasoning": plan.get("reasoning", ""),
-                    "tools_used": [step.get("tool") for step in plan.get("pipeline", [])]
-                },
-                "score": score,
-                "success": True
-            }
-            
-            # Store pattern
-            pattern_file = os.path.join(patterns_dir, f"pattern_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-            with open(pattern_file, 'w') as f:
-                json.dump(pattern, f, indent=2)
-            
-            self.logger.info(f"✅ Stored successful plan pattern: {pattern_file}")
-            
+            system_prompt = """You are the DualMind Research Architect.
+Transform raw queries into research strategies. Respond ONLY with JSON:
+{
+    "cleaned_query": "normalized query",
+    "intent": "research_report|technical_explanation|coding_task|market_analysis|visualization_request|brainstorming",
+    "visualization_required": true/false,
+    "search_strategy": {
+        "academic": ["query1"], "news": ["query1"], "general": ["query1"], "data": ["query1"]
+    },
+    "task_decomposition": ["milestone 1", "milestone 2"],
+    "reasoning": "Why this decomposition"
+}"""
+            response = self.router.call(
+                role="planner",
+                prompt=f"Raw Query: {raw_query}",
+                system_prompt=system_prompt,
+                require_json=True,
+                max_tokens=800,
+            )
+
+            if response and isinstance(response, dict):
+                if "search_strategy" not in response:
+                    response["search_strategy"] = {
+                        "academic": [raw_query], "news": [raw_query],
+                        "general": [raw_query], "data": [raw_query],
+                    }
+                return response
+
         except Exception as e:
-            self.logger.warning(f"Failed to store plan pattern: {e}")
-    
-    def _extract_query_features(self, query: str) -> Dict[str, Any]:
-        """Extract features from query for pattern matching."""
-        query_lower = query.lower()
-        
-        features = {
-            "length": len(query.split()),
-            "has_question": "?" in query,
-            "type": self._classify_query_type(query_lower),
-            "keywords": []
+            self.logger.warning(f"Semantic analysis failed: {e}")
+
+        return {
+            "cleaned_query": raw_query,
+            "intent": "research_report",
+            "visualization_required": "visual" in raw_query.lower() or "chart" in raw_query.lower(),
+            "search_strategy": {
+                "academic": [raw_query], "news": [raw_query],
+                "general": [raw_query], "data": [raw_query],
+            },
         }
-        
-        # Extract domain keywords
-        domains = [
-            ("ai", ["ai", "artificial intelligence", "machine learning", "deep learning", "neural"]),
-            ("science", ["research", "study", "scientific", "academic", "paper"]),
-            ("news", ["news", "recent", "latest", "current", "update"]),
-            ("analysis", ["analyze", "sentiment", "trend", "pattern", "data"]),
-            ("technical", ["how", "technical", "implement", "code", "algorithm"])
+
+    def _generate_plan(self, query: str, memory_context: str, preprocessed: Dict) -> Dict[str, Any]:
+        """Generate an execution plan using the Planner Agent."""
+        try:
+            from agents.registry import get_agent
+            planner = get_agent("planner")
+
+            context = ""
+            if memory_context:
+                context += f"{memory_context}\n\n"
+            context += f"Intent: {preprocessed.get('intent', 'research_report')}\n"
+            context += f"Search Strategy: {json.dumps(preprocessed.get('search_strategy', {}))}"
+
+            result = planner.execute(query, context)
+
+            if result.status == "success" and result.metadata:
+                plan = result.metadata
+                if "pipeline" in plan:
+                    return plan
+
+        except Exception as e:
+            self.logger.warning(f"Agent planning failed: {e}")
+
+        # Fallback: rule-based plan
+        return self._fallback_plan(query, preprocessed)
+
+    def _fallback_plan(self, query: str, preprocessed: Dict) -> Dict[str, Any]:
+        """Rule-based fallback plan when LLM planning fails."""
+        intent = preprocessed.get("intent", "research_report")
+        pipeline = [
+            {"step": 1, "tool": "web_search", "input": query, "purpose": "Live web intelligence", "depends_on": []},
+            {"step": 2, "tool": "wikipedia_search", "input": query, "purpose": "Background knowledge", "depends_on": []},
+            {"step": 3, "tool": "arxiv_summarizer", "input": query, "purpose": "Academic research", "depends_on": []},
+            {"step": 4, "tool": "news_fetcher", "input": query, "purpose": "Current developments", "depends_on": []},
         ]
-        
-        for domain, keywords in domains:
-            if any(kw in query_lower for kw in keywords):
-                features["keywords"].append(domain)
-        
-        return features
-    
-    def _classify_query_type(self, query: str) -> str:
-        """Classify query into type categories."""
-        if any(word in query for word in ["what", "explain", "define"]):
-            return "explanation"
-        elif any(word in query for word in ["how", "implement", "create"]):
-            return "how-to"
-        elif any(word in query for word in ["analyze", "sentiment", "trend"]):
-            return "analysis"
-        elif any(word in query for word in ["research", "find", "papers"]):
-            return "research"
-        else:
-            return "general"
-    
-    def get_similar_successful_patterns(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Retrieve similar successful patterns for learning."""
+
+        if preprocessed.get("visualization_required"):
+            pipeline.append({"step": 5, "tool": "data_plotter", "input": query, "purpose": "Data visualization", "depends_on": [1, 2, 3]})
+
+        return {"pipeline": pipeline, "reasoning": "Fallback multi-source research plan"}
+
+    def _verify_plan(self, plan: Dict, query: str) -> Dict[str, Any]:
+        """Verify plan quality using the Verifier Agent."""
         try:
-            patterns_dir = os.path.join(self.logs_dir, "patterns")
-            if not os.path.exists(patterns_dir):
-                return []
-            
-            query_features = self._extract_query_features(query)
-            patterns = []
-            
-            # Load all patterns
-            for pattern_file in os.listdir(patterns_dir):
-                if pattern_file.endswith('.json'):
-                    with open(os.path.join(patterns_dir, pattern_file), 'r') as f:
-                        pattern = json.load(f)
-                        # Calculate similarity
-                        similarity = self._calculate_pattern_similarity(query_features, pattern.get("query_features", {}))
-                        pattern["similarity"] = similarity
-                        patterns.append(pattern)
-            
-            # Sort by similarity and return top matches
-            patterns.sort(key=lambda x: x.get("similarity", 0), reverse=True)
-            return patterns[:limit]
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to retrieve patterns: {e}")
-            return []
-    
-    def _calculate_pattern_similarity(self, features1: Dict, features2: Dict) -> float:
-        """Calculate similarity between two query feature sets."""
-        score = 0.0
-        
-        # Type match (40%)
-        if features1.get("type") == features2.get("type"):
-            score += 0.4
-        
-        # Keyword overlap (40%)
-        keywords1 = set(features1.get("keywords", []))
-        keywords2 = set(features2.get("keywords", []))
-        if keywords1 and keywords2:
-            overlap = len(keywords1 & keywords2) / len(keywords1 | keywords2)
-            score += 0.4 * overlap
-        
-        # Question type match (20%)
-        if features1.get("has_question") == features2.get("has_question"):
-            score += 0.2
-        
-        return score
+            from agents.registry import get_agent
+            verifier = get_agent("verifier")
 
-    def _log_session(self, results: Dict[str, Any]):
-        """Log the session results for traceability."""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(self.logs_dir, f"session_{timestamp}.json")
+            plan_summary = json.dumps(plan.get("pipeline", []), indent=2)
+            result = verifier.execute(query, plan_summary)
 
-            with open(log_file, 'w') as f:
-                json.dump(results, f, indent=2, default=str)
-
-            self.logger.info(f"Session logged to: {log_file}")
+            if result.status == "success" and result.metadata:
+                return result.metadata
 
         except Exception as e:
-            self.logger.error(f"Error logging session: {e}")
+            self.logger.warning(f"Verification failed: {e}")
 
-    def get_execution_summary(self, results: Dict[str, Any]) -> str:
-        """Generate a human-readable summary of the execution."""
-        summary = "📋 **DualMind Orchestrator Execution Summary**\n\n"
+        # Fallback: approve with moderate score
+        return {"score": 70, "approved": True, "issues": [], "suggestions": []}
 
-        # Basic info
-        summary += f"**Session ID:** {results.get('session_id', 'Unknown')}\n"
-        summary += f"**Query:** {results.get('user_query', 'Unknown')}\n"
-        summary += f"**Execution Time:** {results.get('execution_time', 0):.2f}s\n"
-        summary += f"**Iterations:** {results.get('iterations', 0)}\n"
-        summary += f"**Status:** {results.get('status', 'Unknown')}\n\n"
+    def _stream_synthesis(self, query: str, context: str, intent: str) -> Generator[str, None, None]:
+        """Stream premium synthesis tokens."""
+        mode_instructions = {
+            "research_report": "Write a comprehensive research report with executive summary, findings, and analysis.",
+            "technical_explanation": "Write a technical deep-dive with mechanisms and implementation details.",
+            "market_analysis": "Write a market analysis with competitive landscape and strategic implications.",
+            "coding_task": "Write a technical guide with code examples and architecture decisions.",
+            "brainstorming": "Generate creative, diverse ideas with lateral thinking approaches.",
+        }
 
-        # Adversarial Loop Summary
-        plan_history = results.get('plan_history', [])
-        if len(plan_history) > 1:
-            summary += "**🔄 Adversarial Loop Evolution:**\n"
-            for entry in plan_history[1:]:
-                iter_num = entry.get('iteration', 0)
-                score = entry.get('score', 0)
-                approved = entry.get('approved', False)
-                status_icon = "✅" if approved else "❌"
-                summary += f"• Iteration {iter_num}: Score {score}/100 {status_icon}\n"
-            
-            if len(plan_history) > 2:
-                first_score = plan_history[1].get('score', 0)
-                last_score = plan_history[-1].get('score', 0)
-                improvement = last_score - first_score
-                if improvement > 0:
-                    summary += f"• **Improvement:** +{improvement} points through adversarial refinement\n"
-            summary += "\n"
-        
-        # Self-correction summary
-        if results.get('self_correction_used', False):
-            summary += "**🔧 Self-Correction Applied:**\n"
-            summary += "• System detected execution failures and auto-corrected\n\n"
+        synthesis_prompt = f"""You are DualMind, a premium AGI Research Operating System.
 
-        # Plan summary
-        plan = results.get('plan', {})
-        revision_num = plan.get('revision_number', 0)
-        summary += "**🎯 Final Plan Overview:**\n"
-        summary += f"• Steps: {len(plan.get('pipeline', []))}\n"
-        if revision_num > 0:
-            summary += f"• Revision: {revision_num} (improved through feedback)\n"
-        if plan.get('self_corrected', False):
-            summary += f"• Self-corrected: Yes\n"
-        summary += f"• Reasoning: {plan.get('reasoning', 'No reasoning')[:100]}...\n\n"
+**User Query:** {query}
+**Intent:** {intent}
 
-        # Verification summary
-        verification = results.get('verification', {})
-        score = verification.get('score', 0)
-        approval = verification.get('overall_approval', False)
-        summary += "**✅ Verification Results:**\n"
-        summary += f"• Final Score: {score}/100\n"
-        summary += f"• Approved: {'Yes' if approval else 'No'}\n"
-        if verification.get('issues'):
-            summary += f"• Issues: {len(verification['issues'])}\n"
-        if verification.get('suggestions'):
-            summary += f"• Suggestions: {len(verification['suggestions'])}\n\n"
+{mode_instructions.get(intent, mode_instructions["research_report"])}
 
-        # Execution summary
-        execution_results = results.get('execution_results', [])
-        success_count = sum(1 for r in execution_results if r.get('status') == 'success')
-        summary += "**⚙️ Execution Results:**\n"
-        summary += f"• Total Steps: {len(execution_results)}\n"
-        summary += f"• Successful: {success_count}\n"
-        summary += f"• Failed: {len(execution_results) - success_count}\n\n"
+### RESEARCH DATA:
+{context[:6000]}
 
-        # Final output
-        if execution_results and execution_results[-1].get('status') == 'success':
-            final_output = execution_results[-1].get('output', 'No output')
-            summary += "**🎉 Final Output:**\n"
-            summary += f"{final_output[:200]}{'...' if len(final_output) > 200 else ''}\n"
+### REQUIREMENTS:
+1. Start directly with high-signal insights — NO boilerplate
+2. Use Markdown hierarchy (##, ###) with **bold** key terms
+3. Reference specific sources ("According to ArXiv research...", "Recent news indicates...")
+4. Every sentence must provide value — no filler
+5. Include confidence qualifiers where appropriate
+6. End with actionable implications or next steps"""
 
-        return summary
+        yield from self.router.call_stream(
+            role="streaming",
+            prompt=synthesis_prompt,
+            max_tokens=3000,
+        )
+
+    def _generate_charts(self, query: str, context: str) -> List[Dict]:
+        """Generate Chart.js configurations using the Visualization Agent."""
+        try:
+            from agents.registry import get_agent
+            viz = get_agent("visualizer")
+            result = viz.execute(query, context[:2000])
+
+            if result.status == "success" and result.metadata:
+                return result.metadata.get("charts", [])
+        except Exception as e:
+            self.logger.warning(f"Chart generation failed: {e}")
+        return []
+
+    def _extract_citations(self, results: List[Dict]) -> List[str]:
+        """Extract citation URLs and references from tool outputs."""
+        citations = []
+        for r in results:
+            output = str(r.get("output", ""))
+            # Extract URLs
+            urls = re.findall(r'https?://[^\s\)\"]+', output)
+            citations.extend(urls[:3])
+            # Extract ArXiv IDs
+            arxiv_ids = re.findall(r'(\d{4}\.\d{4,5})', output)
+            for aid in arxiv_ids[:2]:
+                citations.append(f"https://arxiv.org/abs/{aid}")
+        return list(set(citations))[:10]
+
+    def _generate_title(self, query: str) -> str:
+        """Generate a concise report title from the query."""
+        # Clean and truncate
+        title = query.strip()
+        if len(title) > 60:
+            title = title[:57] + "..."
+        return f"Research: {title}"
+
+    def _markdown_to_html(self, markdown_text: str) -> str:
+        """Convert markdown to HTML for artifact rendering."""
+        html = markdown_text
+
+        # Headers
+        html = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+        html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+        html = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+
+        # Bold and italic
+        html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+        html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', html)
+
+        # Lists
+        html = re.sub(r'^- (.+)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+        html = re.sub(r'^(\d+)\. (.+)$', r'<li>\2</li>', html, flags=re.MULTILINE)
+
+        # Blockquotes
+        html = re.sub(r'^> (.+)$', r'<blockquote>\1</blockquote>', html, flags=re.MULTILINE)
+
+        # Code blocks
+        html = re.sub(r'```(\w*)\n(.*?)```', r'<pre><code class="\1">\2</code></pre>', html, flags=re.DOTALL)
+        html = re.sub(r'`(.+?)`', r'<code>\1</code>', html)
+
+        # Paragraphs
+        html = re.sub(r'\n\n', '</p><p>', html)
+        html = f'<p>{html}</p>'
+
+        # Clean up empty tags
+        html = re.sub(r'<p>\s*</p>', '', html)
+
+        return html
+
+    # ── Legacy API Compatibility ─────────────────────────────────────
+
+    def process_query(self, user_query: str, max_iterations: int = 2) -> Dict[str, Any]:
+        """Synchronous query processing (legacy compatibility)."""
+        results = {
+            "session_id": f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "user_query": user_query,
+            "status": "completed",
+        }
+
+        token_buffer = ""
+        for event in self.process_query_stream(user_query, max_iterations):
+            if event.get("type") == "token":
+                token_buffer += event.get("content", "")
+            elif event.get("type") == "error":
+                results["status"] = "error"
+                results["error"] = event.get("message", "")
+
+        results["synthesized_answer"] = token_buffer
+        return results
 
 
-def create_orchestrator() -> Orchestrator:
-    """
-    Factory function to create an Orchestrator instance.
-
-    Returns:
-        Orchestrator: Configured orchestrator instance
-    """
-    return Orchestrator()
+def create_orchestrator() -> CognitiveOrchestrator:
+    """Factory function to create the orchestrator."""
+    return CognitiveOrchestrator()

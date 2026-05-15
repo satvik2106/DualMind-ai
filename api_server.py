@@ -589,11 +589,193 @@ async def upload_endpoint(
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  ARTIFACT ENDPOINTS — Claude-style inline artifact viewing
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/artifacts")
+async def list_artifacts(conversationId: str = ""):
+    """List all artifacts, optionally filtered by conversation."""
+    try:
+        from artifacts.artifact_manager import get_artifact_manager
+        manager = get_artifact_manager()
+        return {"status": "success", "artifacts": manager.list_artifacts(conversationId)}
+    except Exception as e:
+        logger.error(f"Failed to list artifacts: {e}")
+        return {"status": "error", "artifacts": [], "error": str(e)}
+
+
+@app.get("/api/artifacts/{artifact_id}")
+async def get_artifact(artifact_id: str):
+    """Get artifact metadata."""
+    try:
+        from artifacts.artifact_manager import get_artifact_manager
+        manager = get_artifact_manager()
+        artifact = manager.get(artifact_id)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        return {"status": "success", "artifact": artifact.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/artifacts/{artifact_id}/view")
+async def view_artifact(artifact_id: str):
+    """Get rendered HTML for inline artifact viewing (side-panel)."""
+    try:
+        from artifacts.artifact_manager import get_artifact_manager
+        manager = get_artifact_manager()
+        html = manager.get_html_content(artifact_id)
+        if not html:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/artifacts/{artifact_id}/download")
+async def download_artifact(artifact_id: str, format: str = "html"):
+    """Download artifact as HTML or PDF."""
+    try:
+        from artifacts.artifact_manager import get_artifact_manager
+        manager = get_artifact_manager()
+        artifact = manager.get(artifact_id)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        if format == "html":
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(
+                content=artifact.content,
+                headers={"Content-Disposition": f'attachment; filename="{artifact.title}.html"'},
+            )
+        elif format == "pdf":
+            # PDF generation via pdfkit
+            try:
+                import pdfkit
+                pdf_bytes = pdfkit.from_string(artifact.content, False)
+                from fastapi.responses import Response
+                return Response(
+                    content=pdf_bytes,
+                    media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{artifact.title}.pdf"'},
+                )
+            except Exception as pdf_err:
+                logger.warning(f"PDF generation failed: {pdf_err}")
+                # Fallback to HTML download
+                from fastapi.responses import HTMLResponse
+                return HTMLResponse(
+                    content=artifact.content,
+                    headers={"Content-Disposition": f'attachment; filename="{artifact.title}.html"'},
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Format must be 'html' or 'pdf'")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  MEMORY & SYSTEM STATUS ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/memory/status")
+async def memory_status():
+    """Get semantic memory system status."""
+    try:
+        from memory.semantic_memory import get_memory
+        mem = get_memory()
+        return {
+            "status": "success",
+            "memory_count": mem.get_memory_count(),
+            "engine": "chromadb" if mem._collection is not None else "fallback",
+        }
+    except Exception as e:
+        return {"status": "unavailable", "memory_count": 0, "error": str(e)}
+
+
+@app.get("/api/memory/recall")
+async def memory_recall(query: str, top_k: int = 5):
+    """Search semantic memory for relevant past interactions."""
+    try:
+        from memory.semantic_memory import get_memory
+        mem = get_memory()
+        recalls = mem.recall(query, top_k=top_k)
+        return {
+            "status": "success",
+            "results": [
+                {
+                    "query": r.entry.query,
+                    "summary": r.entry.response_summary,
+                    "similarity": round(r.similarity, 3),
+                    "score": round(r.decay_adjusted_score, 3),
+                    "intent": r.entry.intent,
+                    "tools_used": r.entry.tools_used,
+                }
+                for r in recalls
+            ],
+        }
+    except Exception as e:
+        return {"status": "error", "results": [], "error": str(e)}
+
+
+@app.get("/api/system/status")
+async def system_status():
+    """Comprehensive system status for the AI OS dashboard."""
+    uptime = round(time.time() - startup_time, 1)
+
+    # Model router status
+    router_status = {}
+    try:
+        from model_router import get_router
+        router_status = get_router().get_status()
+    except Exception:
+        router_status = {"error": "Router unavailable"}
+
+    # Memory status
+    memory_count = 0
+    try:
+        from memory.semantic_memory import get_memory
+        memory_count = get_memory().get_memory_count()
+    except Exception:
+        pass
+
+    # Artifact count
+    artifact_count = 0
+    try:
+        from artifacts.artifact_manager import get_artifact_manager
+        artifact_count = len(get_artifact_manager().list_artifacts())
+    except Exception:
+        pass
+
+    return {
+        "status": "online",
+        "version": "2.0.0",
+        "service": "DualMind AI OS",
+        "uptime_seconds": uptime,
+        "tools_loaded": len(orchestrator.tools),
+        "memory_entries": memory_count,
+        "artifacts_count": artifact_count,
+        "model_router": router_status,
+        "capabilities": [
+            "semantic_memory", "dag_orchestration", "agent_ecosystem",
+            "artifact_system", "live_streaming", "web_research",
+            "interactive_charts", "pdf_reports",
+        ],
+    }
+
+
 if __name__ == "__main__":  # pragma: no cover
     import uvicorn
 
     # Render sets PORT; fallback to API_PORT or 8000 for local dev
     port = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
     host = os.getenv("API_HOST", "0.0.0.0")
-    logger.info("Starting DualMind API on %s:%s", host, port)
+    logger.info("Starting DualMind AI OS on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port)

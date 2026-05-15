@@ -8,7 +8,7 @@
     },
     {
       "name": "semantic_scholar",
-      "description": "**RESEARCH TOOL** - Searches 200M+ academic papers across ALL disciplines using Semantic Scholar API. Provides citation counts, influential citation metrics, and impact scores. More comprehensive than ArXiv - covers computer science, medicine, biology, physics, and more.",
+      "description": "**RESEARCH TOOL** - Searches 200M+ academic papers across ALL disciplines using Semantic Scholar API. Provides citation counts, influential citation metrics, and impact scores.",
       "input": "research query or topic (any academic field)",
       "output": "list of highly-cited papers with titles, authors, abstracts, citation counts, influence scores, and URLs"
     },
@@ -44,27 +44,33 @@
     },
     {
       "name": "data_plotter",
-      "description": "Creates simple data visualizations using matplotlib. Takes structured data and generates charts, graphs, or plots as image files.",
+      "description": "Creates data visualizations and interactive charts. Takes structured data and generates Chart.js-compatible JSON for inline rendering plus static fallback images.",
       "input": "structured data (lists, dictionaries) and chart type specification",
-      "output": "path to generated chart image file"
+      "output": "Chart.js configuration JSON and optional PNG fallback path"
     },
     {
       "name": "document_writer",
-      "description": "Generates professional PDF reports with formatted text, sections, and images. Can create comprehensive research reports, summaries, and documentation.",
-      "input": "JSON structure with content, sections, and formatting instructions",
-      "output": "path to generated PDF file"
+      "description": "Generates professional PDF and HTML reports with formatted text, sections, embedded charts, and citations. Creates executive-grade research reports.",
+      "input": "JSON structure with content, sections, charts, and formatting instructions",
+      "output": "path to generated PDF/HTML file"
     },
     {
       "name": "qa_engine",
-      "description": "**PRIMARY TOOL** - Generates comprehensive, detailed answers using OpenRouter LLM API. MUST be used as final step to synthesize information from other tools into a complete answer. Takes questions and context to provide intelligent, well-structured responses.",
+      "description": "**PRIMARY TOOL** - Generates comprehensive, detailed answers using OpenRouter LLM API. MUST be used as final step to synthesize information from other tools into a complete answer.",
       "input": "question text and optional context (can include outputs from previous tools)",
       "output": "comprehensive, detailed answer with explanations and insights"
     },
     {
-      "name": "document_writer",
-      "description": "Generates structured PDF reports using fpdf. Combines text content and images to create formatted PDF documents.",
-      "input": "text content, images (optional), and formatting specifications",
-      "output": "path to generated PDF file"
+      "name": "web_search",
+      "description": "**WEB INTELLIGENCE TOOL** - Performs live web searches using DuckDuckGo to find current information, URLs, and real-time data. Essential for queries requiring up-to-date information.",
+      "input": "search query string",
+      "output": "list of search results with titles, URLs, and snippets"
+    },
+    {
+      "name": "web_scraper",
+      "description": "**WEB EXTRACTION TOOL** - Extracts clean text content from web pages using trafilatura. Converts web pages into structured, readable text for analysis.",
+      "input": "URL of the web page to scrape",
+      "output": "extracted text content with metadata"
     }
   ]
 }

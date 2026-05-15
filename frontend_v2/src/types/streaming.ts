@@ -11,9 +11,11 @@
 // ---------------------------------------------------------------------------
 
 export interface PlanStep {
+  step: number;
   tool: string;
   purpose: string;
   input?: string;
+  depends_on?: number[];
 }
 
 export interface PlanPayload {

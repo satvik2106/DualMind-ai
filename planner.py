@@ -283,10 +283,12 @@ class Planner:
             "final_output": "Creative brainstorm results and ideation list"
         }
 
-    def create_plan(self, user_query: str, orchestrator=None, intent: str = "research_report") -> Dict[str, Any]:
+    def create_plan(self, user_query: str, orchestrator=None, preprocessed: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Create a task plan based on the user query with learning/adaptation and intent awareness.
+        Create a task plan based on the user query with learning/adaptation and semantic intelligence.
         """
+        intent = preprocessed.get("intent", "research_report") if preprocessed else "research_report"
+        
         # LEARNING/ADAPTATION: Check for similar successful patterns
         similar_patterns = []
         if orchestrator:
@@ -303,7 +305,7 @@ class Planner:
         # Try to use LLM for plan generation
         if self.llm_client and self.llm_client.is_available():
             try:
-                llm_plan = self._create_llm_plan(user_query, similar_patterns)
+                llm_plan = self._create_llm_plan(user_query, similar_patterns, preprocessed)
                 if llm_plan and "pipeline" in llm_plan and llm_plan["pipeline"]:
                     return llm_plan
             except Exception as e:
@@ -598,8 +600,8 @@ Create an IMPROVED task plan that addresses all the issues and suggestions above
         
         return adapted_plan
     
-    def _create_llm_plan(self, user_query: str, similar_patterns: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Create a plan using LLM for intelligent analysis with learning context."""
+    def _create_llm_plan(self, user_query: str, similar_patterns: List[Dict[str, Any]] = None, preprocessed: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Create a plan using LLM for intelligent analysis with semantic research strategy."""
         
         # Add learning context if available
         learning_context = ""
@@ -613,47 +615,57 @@ Create an IMPROVED task plan that addresses all the issues and suggestions above
                 if tools_used:
                     learning_context += f"   Successful tools: {', '.join(tools_used)}\n"
         
+        # Add semantic research strategy context
+        research_context = ""
+        if preprocessed:
+            strategy = preprocessed.get("search_strategy", {})
+            decomposition = preprocessed.get("task_decomposition", [])
+            research_context = f"\n\nSEMANTIC RESEARCH STRATEGY:\n"
+            research_context += f"Detected Intent: {preprocessed.get('intent')}\n"
+            research_context += f"Visual Report Required: {preprocessed.get('visualization_required')}\n"
+            research_context += "Decomposition Milestones:\n"
+            for m in decomposition:
+                research_context += f"- {m}\n"
+            research_context += "\nDomain-Specific Optimized Queries:\n"
+            research_context += f"- Academic: {', '.join(strategy.get('academic', []))}\n"
+            research_context += f"- News: {', '.join(strategy.get('news', []))}\n"
+            research_context += f"- General: {', '.join(strategy.get('general', []))}\n"
+            research_context += f"- Data: {', '.join(strategy.get('data', []))}\n"
+
         # Prepare the system prompt for planning
-        system_prompt = """You are a JSON-only response bot. You MUST respond with ONLY valid JSON. No other text is allowed.
+        system_prompt = """You are the DualMind Orchestration Strategist.
+Your task is to build a sophisticated multi-agent research pipeline.
 
 Available tools:
 {tools_description}
 
-⚠️ CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
-1. Your response MUST start with {{ and end with }}
-2. DO NOT write ANY text before the {{
-3. DO NOT write ANY text after the }}
-4. DO NOT use markdown code blocks (```)
-5. DO NOT include explanations or comments
-6. ONLY output valid, parseable JSON
+⚠️ ORCHESTRATION RULES:
+1. **Semantic Query Routing**: 
+   - Use 'academic' queries for arxiv_summarizer and semantic_scholar.
+   - Use 'news' queries for news_fetcher.
+   - Use 'general' queries for wikipedia_search.
+   - Use 'data' queries for tools requiring statistics or trends.
+2. **Decomposition Alignment**: Structure the pipeline to follow the provided research milestones.
+3. **Visual Intent**: If 'visualization_required' is true, ENSURE data_plotter is included with data-rich inputs.
+4. **Synthesis First**: ALWAYS end with qa_engine to synthesize all findings.
+5. **JSON ONLY**: Respond with ONLY the JSON object.
 
-Required structure:
+Structure:
 {{
-    "query": "original user query here",
-    "reasoning": "your planning reasoning",
+    "query": "original user query",
+    "reasoning": "Strategy explanation",
     "pipeline": [
-        {{"tool": "tool_name", "purpose": "why needed", "input": "tool input"}}
+        {{"tool": "tool_name", "purpose": "why", "input": "optimized_query_for_this_tool"}}
     ],
-    "final_output": "what the pipeline will produce"
-}}
-
-Rules:
-- Use 2-5 tools maximum
-- Only use tools from available list above
-- Create logical sequences
-- ALWAYS include qa_engine as the LAST step to synthesize a comprehensive answer
-- For information gathering, use wikipedia_search, arxiv_summarizer, or news_fetcher BEFORE qa_engine
-- If similar successful patterns are provided, consider their tool choices
-- Ensure proper JSON syntax (commas, quotes, etc.)
-
-IMPORTANT: Your ENTIRE response must be valid JSON. Start typing {{ immediately."""
+    "final_output": "Description"
+}}"""
 
         # Format available tools for the prompt
         tools_description = ""
         for tool in self.tools:
             tools_description += f"- {tool.get('name', 'Unknown')}: {tool.get('description', 'No description')}\n"
 
-        prompt = f"User Query: {user_query}{learning_context}\n\nCreate a task plan:"
+        prompt = f"User Query: {user_query}{learning_context}{research_context}\n\nCreate the orchestration plan:"
 
         llm_response = self.llm_client.call_llm(
             prompt=prompt,

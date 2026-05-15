@@ -12,6 +12,13 @@ pdfplumber
 openai
 firebase-admin
 gunicorn
-uvicorn[standard]
 matplotlib
 fpdf2
+
+# AI OS Core Dependencies
+chromadb==0.4.24
+sentence-transformers==2.5.1
+trafilatura==1.8.1
+pdfkit==1.0.0
+networkx==3.2.1
+cachetools==5.3.3
