@@ -39,11 +39,11 @@ export default function TelemetryPanel() {
       exit={{ opacity: 0, y: 20 }}
       className="fixed bottom-24 right-8 z-50 pointer-events-none"
     >
-      <div className="glass-panel p-4 min-w-[240px] flex flex-col gap-3 pointer-events-auto bg-background/40 backdrop-blur-xl border border-white/10 shadow-2xl">
+      <div className="glass-panel p-4 min-w-[240px] flex flex-col gap-3 pointer-events-auto bg-background/40 backdrop-blur-xl border border-border-glass shadow-2xl">
         {/* Header / Status */}
-        <div className="flex items-center justify-between border-b border-white/5 pb-2">
+        <div className="flex items-center justify-between border-b border-border-glass pb-2">
           <div className="flex items-center gap-2">
-            <div className={`p-1 rounded-full bg-white/5 ${getStatusColor()}`}>
+            <div className={`p-1 rounded-full bg-glass-overlay ${getStatusColor()}`}>
               {getStatusIcon()}
             </div>
             <span className={`text-[10px] font-bold tracking-widest uppercase ${getStatusColor()}`}>
@@ -72,7 +72,7 @@ export default function TelemetryPanel() {
         </div>
 
         {/* Live Indicator Bar */}
-        <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+        <div className="h-1 w-full bg-glass-overlay rounded-full overflow-hidden">
           <motion.div 
             className="h-full bg-gradient-to-r from-accent-cyan via-accent-purple to-accent-deep-purple"
             animate={{ 

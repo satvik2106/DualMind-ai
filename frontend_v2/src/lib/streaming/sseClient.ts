@@ -8,7 +8,8 @@
 
 import type { OrchestrationEvent } from '@/types/streaming';
 import { useChatStore } from '@/lib/store/chatStore';
-import { auth } from '@/lib/firebase/config';
+import { saveMessageToDB } from '@/lib/api';
+
 
 // Map backend tool names → agent visualiser names
 const TOOL_TO_AGENT: Record<string, string> = {
@@ -24,6 +25,24 @@ const TOOL_TO_AGENT: Record<string, string> = {
   pdf_parser:          'researcher',
 };
 
+let currentAbortController: AbortController | null = null;
+
+/**
+ * Abort/interrupted the active AI generation stream.
+ */
+export function abortStream(): void {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+    
+    const store = useChatStore.getState();
+    store.setIsStreaming(false);
+    store.setStreamStatus('idle');
+    store.setActivePhase(null);
+    store.setCurrentActiveTool(null);
+  }
+}
+
 /**
  * Send a chat message and stream the orchestration response.
  *
@@ -37,8 +56,7 @@ export async function streamChat(message: string): Promise<void> {
   store.setErrorDetail(null);
   store.setStreamStatus('connecting');
 
-  // Optimistic UI: add user message, prepare assistant placeholder
-  store.addUserMessage(message);
+  // Assistant placeholder
   const assistantId = store.startAssistantMessage();
   const conversationId = store.activeConversationId;
   
@@ -55,12 +73,14 @@ export async function streamChat(message: string): Promise<void> {
   const runStream = async (): Promise<void> => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      currentAbortController = new AbortController();
       const response = await fetch(`${apiUrl}/api/chat/stream`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ message, conversationId: conversationId || '' }),
+        signal: currentAbortController.signal,
       });
 
       if (!response.ok) {
@@ -118,13 +138,30 @@ export async function streamChat(message: string): Promise<void> {
       }
 
       // Final status check
-      const msg = useChatStore.getState().messages.find(m => m.id === assistantId);
+      const state = useChatStore.getState();
+      const msg = state.messages.find(m => m.id === assistantId);
       if (msg && msg.status !== 'complete' && msg.status !== 'error') {
         store.setMessageStatus(assistantId, 'complete');
       }
+      
+      // PERSISTENCE: Save assistant message to history
+      // Re-read conversationId from store — it may have been set AFTER streamChat was called
+      const currentConvId = useChatStore.getState().activeConversationId;
+      if (currentConvId) {
+        const finalMsg = useChatStore.getState().messages.find(m => m.id === assistantId);
+        if (finalMsg) {
+          await saveMessageToDB(currentConvId, { ...finalMsg, status: 'complete' });
+        }
+      }
+      
       store.setStreamStatus('idle');
 
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        store.setStreamStatus('idle');
+        return;
+      }
+
       if (retryCount < maxRetries && !err.message.includes('SERVER_ERROR:4')) {
         retryCount++;
         store.setStreamStatus('reconnecting');

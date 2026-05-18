@@ -1,0 +1,95 @@
+import type { ChatMessage } from '@/lib/store/chatStore';
+
+export interface Chat {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  isPinned?: boolean;
+}
+
+export async function createConversation(title: string = "New Conversation"): Promise<string> {
+  const res = await fetch('/api/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title })
+  });
+  if (!res.ok) throw new Error('Failed to create chat');
+  const chat = await res.json();
+  return chat.id;
+}
+
+export async function getUserConversations(): Promise<Chat[]> {
+  const res = await fetch('/api/chats');
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/**
+ * Fetches messages from PostgreSQL and normalizes them into ChatMessage format.
+ * The DB returns raw Prisma rows — we must ensure the shape matches the Zustand model.
+ */
+export async function getConversationMessages(chatId: string): Promise<ChatMessage[]> {
+  const res = await fetch(`/api/messages/${chatId}`);
+  if (!res.ok) return [];
+  const raw: any[] = await res.json();
+  return raw.map((m) => ({
+    id: m.id,
+    role: m.role as 'user' | 'assistant',
+    content: m.content || '',
+    status: (m.status || 'complete') as ChatMessage['status'],
+    toolRecords: Array.isArray(m.toolRecords) ? m.toolRecords : [],
+    plan: m.plan || undefined,
+    verifierScore: m.verifierScore ?? undefined,
+    executionTime: m.executionTime ?? undefined,
+  }));
+}
+
+export async function deleteConversation(chatId: string): Promise<void> {
+  const res = await fetch(`/api/chats/${chatId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete chat');
+}
+
+export async function saveMessageToDB(chatId: string, message: ChatMessage): Promise<void> {
+  if (!chatId || message.status === 'streaming') return;
+  try {
+    const res = await fetch(`/api/messages/${chatId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        status: message.status || 'complete',
+        toolRecords: message.toolRecords ?? [],
+        plan: message.plan ?? null,
+        verifierScore: message.verifierScore ?? null,
+        executionTime: message.executionTime ?? null,
+      })
+    });
+    if (!res.ok) {
+      console.error('[DualMind] Failed to save message:', await res.text());
+    }
+  } catch (err) {
+    console.error('[DualMind] Error saving message:', err);
+  }
+}
+
+export async function togglePinConversation(chatId: string, isPinned: boolean): Promise<void> {
+  const res = await fetch(`/api/chats/${chatId}/pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isPinned })
+  });
+  if (!res.ok) throw new Error('Failed to toggle pin');
+}
+
+export async function updateChatTitle(chatId: string, title: string): Promise<void> {
+  const res = await fetch(`/api/chats/${chatId}/title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title })
+  });
+  if (!res.ok) throw new Error('Failed to rename chat');
+}

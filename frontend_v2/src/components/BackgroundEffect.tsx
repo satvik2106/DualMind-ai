@@ -6,7 +6,7 @@ export default function BackgroundEffect() {
   return (
     <div className="fixed inset-0 -z-50 overflow-hidden pointer-events-none">
       {/* Base deep space gradient */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#0B1120] via-[#050816] to-black" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-background-secondary via-background to-background" />
 
       {/* Floating neon orbs */}
       <motion.div

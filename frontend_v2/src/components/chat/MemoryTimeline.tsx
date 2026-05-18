@@ -7,10 +7,10 @@ import {
   ChevronRight, Calendar, Archive, Bookmark
 } from 'lucide-react';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
-import type { Conversation } from '@/lib/firebase/firestore';
+import type { Chat } from '@/lib/api';
 
 interface MemoryTimelineProps {
-  conversations: Conversation[];
+  conversations: Chat[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -102,7 +102,7 @@ function TimelineSection({
 }: { 
   title: string; 
   icon: React.ReactNode;
-  items: Conversation[]; 
+  items: Chat[]; 
   activeId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -120,7 +120,7 @@ function TimelineSection({
         </span>
       </div>
       
-      <div className="space-y-0.5 relative pl-4 ml-3 border-l border-white/5">
+      <div className="space-y-0.5 relative pl-4 ml-3 border-l border-border-glass">
         <AnimatePresence mode="popLayout">
           {items.map((conv) => (
             <TimelineItem
@@ -145,7 +145,7 @@ function TimelineItem({
   onDelete, 
   onPin 
 }: { 
-  conv: Conversation; 
+  conv: Chat; 
   isActive: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -166,14 +166,14 @@ function TimelineItem({
       {/* Node Dot */}
       <div className={`
         absolute -left-[21px] top-4 w-2 h-2 rounded-full border bg-background z-10 transition-all duration-300
-        ${isActive ? 'border-accent-cyan scale-125 shadow-[0_0_8px_rgba(0,229,255,0.6)]' : 'border-white/20 group-hover:border-white/40'}
+        ${isActive ? 'border-accent-cyan scale-125 shadow-[0_0_8px_rgba(0,229,255,0.6)]' : 'border-border-glass group-hover:border-border-subtle'}
       `} />
 
       <div
         onClick={() => onSelect(conv.id)}
         className={`
           w-full text-left px-4 py-3 rounded-xl transition-all duration-300 cursor-pointer flex items-center gap-3 relative overflow-hidden
-          ${isActive ? 'bg-white/10 text-white border border-white/10' : 'hover:bg-white/5 text-foreground-muted hover:text-white border border-transparent'}
+          ${isActive ? 'bg-glass-overlay text-foreground border border-border-glass' : 'hover:bg-glass-overlay text-foreground-muted hover:text-foreground border border-transparent'}
         `}
       >
         {/* Active Glow */}
@@ -204,13 +204,13 @@ function TimelineItem({
         `}>
           <button 
             onClick={(e) => { e.stopPropagation(); onPin(conv.id, !conv.isPinned); }}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-foreground-muted hover:text-accent-cyan transition-colors"
+            className="p-1.5 rounded-lg hover:bg-glass-overlay text-foreground-muted hover:text-accent-cyan transition-colors"
           >
             <Pin className={`w-3 h-3 ${conv.isPinned ? 'fill-accent-cyan text-accent-cyan' : ''}`} />
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-foreground-muted hover:text-red-400 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-glass-overlay text-foreground-muted hover:text-red-400 transition-colors"
           >
             <Trash2 className="w-3 h-3" />
           </button>
@@ -224,14 +224,14 @@ function TimelineItem({
             initial={{ opacity: 0, x: 10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
-            className="absolute left-[105%] top-0 z-50 w-48 p-3 glass-panel border border-white/10 shadow-2xl pointer-events-none"
+            className="absolute left-[105%] top-0 z-50 w-48 p-3 glass-panel border border-border-glass shadow-2xl pointer-events-none"
           >
             <div className="text-[10px] font-bold text-accent-purple uppercase tracking-wider mb-2">Memory Preview</div>
             <div className="text-[10px] text-foreground-muted line-clamp-3 leading-relaxed italic">
               "Restoring previous session context... Agent Researcher identified 4 key papers on neural architecture."
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <div className="h-1 flex-1 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-1 flex-1 bg-glass-overlay rounded-full overflow-hidden">
                 <div className="h-full w-2/3 bg-accent-cyan" />
               </div>
               <span className="text-[8px] font-mono text-accent-cyan">84% Match</span>

@@ -111,13 +111,15 @@ const NeuralEdge = memo(({ from, to, isActive, isCompleted }: NeuralEdgeProps) =
 // --- Main Component ---
 
 const NeuralParticles = memo(() => {
-  const particles = useMemo(() => [...Array(6)].map((_, i) => ({
-    id: i,
-    x: (Math.random() * 100) + '%',
-    y: (Math.random() * 100) + '%',
-    duration: 4 + Math.random() * 4,
-    delay: Math.random() * 5
-  })), []);
+  // Deterministic particle positions — avoids SSR/client hydration mismatch from Math.random()
+  const particles = useMemo(() => [
+    { id: 0, x: '12%', y: '78%', duration: 5.2, delay: 0.3 },
+    { id: 1, x: '45%', y: '22%', duration: 6.8, delay: 1.1 },
+    { id: 2, x: '73%', y: '55%', duration: 4.5, delay: 2.4 },
+    { id: 3, x: '28%', y: '91%', duration: 7.1, delay: 0.8 },
+    { id: 4, x: '88%', y: '34%', duration: 5.9, delay: 3.2 },
+    { id: 5, x: '56%', y: '67%', duration: 6.3, delay: 1.7 },
+  ], []);
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">

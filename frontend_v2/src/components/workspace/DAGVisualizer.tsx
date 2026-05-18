@@ -121,12 +121,12 @@ export default function DAGVisualizer() {
   if (levels.length === 0) return null;
 
   return (
-    <div className="relative w-full h-full overflow-hidden flex flex-col p-6 rounded-xl bg-gradient-to-br from-[#0A0F1C] to-[#050B14] border border-white/5 shadow-2xl">
+    <div className="relative w-full h-full overflow-hidden flex flex-col p-6 rounded-xl bg-background-secondary border border-border-glass shadow-2xl">
       <div className="flex items-center gap-2 mb-6 text-accent-cyan font-mono text-sm tracking-widest uppercase z-10 shrink-0">
         <Activity size={16} className="animate-pulse" />
         <span>Cognitive Topology</span>
-        <div className="ml-auto flex items-center gap-4 text-xs font-sans capitalize tracking-normal text-white/50">
-           <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-white/20"/> Pending</span>
+        <div className="ml-auto flex items-center gap-4 text-xs font-sans capitalize tracking-normal text-foreground-muted">
+           <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-foreground-muted/40"/> Pending</span>
            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]"/> Running</span>
            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/> Success</span>
         </div>
@@ -148,9 +148,9 @@ export default function DAGVisualizer() {
                 const isSuccess = node.status === 'success';
                 const isError = node.status === 'error';
 
-                let borderColor = 'border-white/10';
-                let bgColor = 'bg-white/5';
-                let textColor = 'text-white/50';
+                let borderColor = 'border-border-glass';
+                let bgColor = 'bg-glass-overlay';
+                let textColor = 'text-foreground-muted';
                 let pulseEffect = '';
                 let glowLayer = null;
 
@@ -182,7 +182,7 @@ export default function DAGVisualizer() {
                     {glowLayer}
                     <div className="relative z-10">
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-mono font-bold bg-black/50 px-2 py-1 rounded-md text-white/70 border border-white/5">
+                        <span className="text-[10px] font-mono font-bold bg-background px-2 py-1 rounded-md text-foreground-muted border border-border-glass">
                           T.{node.step}
                         </span>
                         <span className="text-[10px] uppercase tracking-widest font-bold opacity-80 text-accent-cyan">
@@ -195,7 +195,7 @@ export default function DAGVisualizer() {
                       
                       {isRunning && (
                         <div className="mt-4 flex items-center gap-2">
-                          <div className="h-1 flex-1 bg-white/10 rounded-full overflow-hidden relative">
+                          <div className="h-1 flex-1 bg-foreground-muted/20 rounded-full overflow-hidden relative">
                             <motion.div 
                               className="absolute top-0 bottom-0 left-0 bg-blue-400"
                               initial={{ width: "0%" }}
@@ -216,7 +216,7 @@ export default function DAGVisualizer() {
       </div>
       
       {plan.reasoning && (
-        <div className="mt-4 pt-4 border-t border-white/5 text-xs font-mono text-white/60 bg-black/20 p-4 rounded-xl shrink-0">
+        <div className="mt-4 pt-4 border-t border-border-glass text-xs font-mono text-foreground/80 bg-glass-overlay p-4 rounded-xl shrink-0">
           <span className="text-accent-cyan mr-2 font-bold uppercase tracking-wider">Strategic Directive:</span>
           {plan.reasoning}
         </div>

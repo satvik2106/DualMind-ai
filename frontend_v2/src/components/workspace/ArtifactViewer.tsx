@@ -65,14 +65,14 @@ export default function ArtifactViewer() {
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className={`flex flex-col bg-[#0A0F1C] border-l border-white/10 ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full'}`}
+        className={`flex flex-col bg-background-secondary border-l border-border-glass ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full'}`}
       >
         {/* Artifact Header */}
-        <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-background-glass backdrop-blur-md shrink-0">
+        <div className="h-14 border-b border-border-glass flex items-center justify-between px-4 bg-background-glass backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3 overflow-hidden">
             <span className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.8)]" />
             <h3 className="font-semibold text-sm truncate max-w-[200px] md:max-w-md">{activeArtifact.title}</h3>
-            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-foreground-muted">
+            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-border-glass bg-glass-overlay text-foreground-muted">
               {activeArtifact.type.replace('_', ' ')}
             </span>
           </div>
@@ -80,22 +80,22 @@ export default function ArtifactViewer() {
           <div className="flex items-center gap-1">
             <button 
               onClick={handleDownloadHtml}
-              className="p-2 hover:bg-white/10 rounded-lg text-foreground-muted hover:text-white transition-colors"
+              className="p-2 hover:bg-glass-overlay rounded-lg text-foreground-muted hover:text-foreground transition-colors"
               title="Download HTML"
             >
               <Download size={16} />
             </button>
             <button 
               onClick={handleDownloadPdf}
-              className="p-2 hover:bg-white/10 rounded-lg text-foreground-muted hover:text-white transition-colors"
+              className="p-2 hover:bg-glass-overlay rounded-lg text-foreground-muted hover:text-foreground transition-colors"
               title="Download PDF"
             >
               <span className="text-xs font-bold uppercase">PDF</span>
             </button>
-            <div className="w-px h-4 bg-white/10 mx-1" />
+            <div className="w-px h-4 bg-foreground-muted/20 mx-1" />
             <button 
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="p-2 hover:bg-white/10 rounded-lg text-foreground-muted hover:text-white transition-colors"
+              className="p-2 hover:bg-glass-overlay rounded-lg text-foreground-muted hover:text-foreground transition-colors"
             >
               <Maximize2 size={16} />
             </button>
@@ -112,15 +112,15 @@ export default function ArtifactViewer() {
 
         {/* Artifact Tabs (Optional for multiple artifacts) */}
         {artifactsList.length > 1 && (
-          <div className="flex items-center px-2 py-1 gap-1 border-b border-white/5 bg-black/20 overflow-x-auto scrollbar-none shrink-0">
+          <div className="flex items-center px-2 py-1 gap-1 border-b border-border-glass bg-glass-overlay overflow-x-auto scrollbar-none shrink-0">
             {artifactsList.map(a => (
               <button
                 key={a.id}
                 onClick={() => setActiveArtifact(a.id, a.type, a.title)}
                 className={`px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-all ${
                   a.id === activeArtifactId 
-                    ? 'bg-white/10 text-white shadow-sm' 
-                    : 'text-foreground-muted hover:bg-white/5 hover:text-white'
+                    ? 'bg-foreground text-background shadow-sm' 
+                    : 'text-foreground-muted hover:bg-glass-overlay hover:text-foreground'
                 }`}
               >
                 {a.title.substring(0, 20)}{a.title.length > 20 ? '...' : ''}

@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { useAuth } from '@/lib/firebase/auth';
+import { useSession } from 'next-auth/react';
+import { ThemeToggle } from './ThemeToggle';
 
 export default function Navbar() {
-  const { user } = useAuth();
+  const { data: session } = useSession();
 
   return (
     <motion.nav 
@@ -29,9 +30,10 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-4">
+          <ThemeToggle className="rounded-full" />
           <Link 
             href="/chat" 
-            className="px-6 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:scale-105 active:scale-95 transition-all duration-300 shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] flex items-center gap-2 group"
+            className="px-6 py-2.5 rounded-full bg-foreground text-background text-sm font-bold hover:scale-105 active:scale-95 transition-all duration-300 shadow-[0_0_20px_rgba(0,0,0,0.1)] dark:shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center gap-2 group"
           >
             <span>Launch Workspace</span>
             <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan group-hover:animate-ping" />

@@ -62,7 +62,7 @@ export default function HeroSection() {
           
           <Link 
             href="#agents"
-            className="px-8 py-4 glass text-foreground font-semibold rounded-full hover:bg-white/10 transition-colors text-lg"
+            className="px-8 py-4 glass text-foreground font-semibold rounded-full hover:bg-glass-highlight transition-colors text-lg"
           >
             Explore Architecture
           </Link>
@@ -77,14 +77,14 @@ export default function HeroSection() {
         className="w-full max-w-5xl mt-24 relative z-0"
       >
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent z-10 h-full" />
-        <div className="relative aspect-[21/9] rounded-t-3xl border-t border-x border-white/10 glass-panel overflow-hidden">
-          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-30 mix-blend-overlay" />
+        <div className="relative aspect-[21/9] rounded-t-3xl border-t border-x border-border-glass glass-panel overflow-hidden">
+          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-[0.15] dark:opacity-30 mix-blend-overlay" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background/90" />
           
           {/* Mockup UI lines */}
           <div className="absolute top-4 left-4 right-4 flex gap-2">
-            <div className="h-2 w-12 rounded-full bg-white/20" />
-            <div className="h-2 w-24 rounded-full bg-white/10" />
+            <div className="h-2 w-12 rounded-full bg-foreground/20" />
+            <div className="h-2 w-24 rounded-full bg-foreground/10" />
           </div>
           
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border border-accent-cyan/20 rounded-full flex items-center justify-center animate-spin-slow">
@@ -92,7 +92,7 @@ export default function HeroSection() {
           </div>
           
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
-            <div className="w-32 h-32 bg-background rounded-full border border-white/10 shadow-[0_0_50px_rgba(0,229,255,0.3)] flex items-center justify-center backdrop-blur-md">
+            <div className="w-32 h-32 bg-background rounded-full border border-border-glass shadow-[0_0_50px_rgba(0,229,255,0.3)] flex items-center justify-center backdrop-blur-md">
               <span className="text-4xl text-glow-cyan font-bold tracking-tighter">DM</span>
             </div>
           </div>

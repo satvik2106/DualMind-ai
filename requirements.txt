@@ -10,7 +10,6 @@ python-multipart
 PyPDF2
 pdfplumber
 openai
-firebase-admin
 gunicorn
 matplotlib
 fpdf2

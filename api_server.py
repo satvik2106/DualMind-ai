@@ -26,7 +26,6 @@ logger = logging.getLogger("dualmind_api")
 
 from orchestrator import create_orchestrator
 from tools.pdf_parser import PDFParserTool
-from firebase_helper import init_firebase
 from tools.wikipedia_search import wikipedia_search_tool
 
 try:
@@ -326,7 +325,7 @@ app = FastAPI(
 # --- CORS & Security ---
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS", 
-    "http://localhost:3000,http://localhost:3001,https://dualmind-ai.web.app,https://dualmind-88ab9.web.app,https://dualmind-88ab9.firebaseapp.com,https://dualmind-ai-cgss.onrender.com"
+    "http://localhost:3000,http://localhost:3001,https://dualmind-ai.vercel.app,https://dualmind-ai-cgss.onrender.com"
 ).split(",")
 
 app.add_middleware(
@@ -344,10 +343,9 @@ pdf_parser = PDFParserTool()
 
 @app.on_event("startup")
 async def startup_event():
-    init_firebase()
+    pass
 
 # --- Auth Dependency ---
-from firebase_helper import verify_id_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 auth_scheme = HTTPBearer()
