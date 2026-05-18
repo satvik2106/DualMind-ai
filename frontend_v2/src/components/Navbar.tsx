@@ -6,7 +6,7 @@ import { useSession } from 'next-auth/react';
 import { ThemeToggle } from './ThemeToggle';
 
 export default function Navbar() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
 
   return (
     <motion.nav 
@@ -32,7 +32,7 @@ export default function Navbar() {
         <div className="flex items-center gap-4">
           <ThemeToggle className="rounded-full" />
           <Link 
-            href="/chat" 
+            href={status === 'authenticated' ? "/chat" : "/login"} 
             className="px-6 py-2.5 rounded-full bg-foreground text-background text-sm font-bold hover:scale-105 active:scale-95 transition-all duration-300 shadow-[0_0_20px_rgba(0,0,0,0.1)] dark:shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center gap-2 group"
           >
             <span>Launch Workspace</span>

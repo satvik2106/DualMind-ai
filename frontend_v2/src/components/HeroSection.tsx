@@ -2,8 +2,11 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 
 export default function HeroSection() {
+  const { status } = useSession();
+
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center pt-32 pb-20 px-4 overflow-hidden">
       <div className="z-10 text-center max-w-5xl mx-auto flex flex-col items-center">
@@ -53,7 +56,7 @@ export default function HeroSection() {
           className="flex flex-col sm:flex-row items-center gap-6"
         >
           <Link 
-            href="/chat"
+            href={status === 'authenticated' ? "/chat" : "/login"}
             className="group relative px-8 py-4 bg-foreground text-background font-semibold rounded-full overflow-hidden transition-all hover:scale-105"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-accent-cyan to-accent-purple opacity-0 group-hover:opacity-20 transition-opacity duration-300" />

@@ -151,7 +151,12 @@ function UserProfile({ onOpenSettings }: { onOpenSettings: () => void }) {
               </button>
               <div className="border-t border-foreground/5" />
               <button 
-                onClick={() => signOut({ callbackUrl: '/login' })}
+                onClick={async () => {
+                  localStorage.removeItem('dualmind_logged_in');
+                  localStorage.removeItem('dualmind_logged_in_provider');
+                  localStorage.removeItem('dualmind_static_user');
+                  await signOut({ callbackUrl: '/login' });
+                }}
                 className="flex items-center gap-2.5 w-full px-3 py-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/5 transition-colors"
               >
                 <LogOut size={14} /> Sign out
