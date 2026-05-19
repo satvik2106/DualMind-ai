@@ -325,7 +325,7 @@ app = FastAPI(
 # --- CORS & Security ---
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS", 
-    "http://localhost:3000,http://localhost:3001,https://dualmind-ai.vercel.app,https://dualmind-ai-cgss.onrender.com"
+    "http://localhost:3000,http://localhost:3001,https://dualmind-ai.vercel.app,https://dualmind-ai-cgss.onrender.com,https://dualmind-ai.web.app,https://dualmind-88ab9.web.app"
 ).split(",")
 
 app.add_middleware(
@@ -377,7 +377,7 @@ async def root():
 async def health() -> dict:
     """Health-check endpoint."""
     uptime = round(time.time() - startup_time, 1)
-    return {"status": "healthy", "uptime_seconds": uptime, "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "uptime_seconds": uptime, "timestamp": datetime.utcnow().isoformat()}
 
 
 class StreamChatRequest(BaseModel):

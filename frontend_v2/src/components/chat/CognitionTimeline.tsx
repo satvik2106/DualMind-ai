@@ -29,6 +29,8 @@ const getEventConfig = (type: string, agent?: string) => {
 
 export default function CognitionTimeline() {
   const timeline = useChatStore(s => s.cognitiveTimeline);
+  const isStreaming = useChatStore(s => s.isStreaming);
+  const streamStatus = useChatStore(s => s.streamStatus);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom as events arrive
@@ -123,11 +125,19 @@ export default function CognitionTimeline() {
         </AnimatePresence>
         
         {/* Streaming indicator */}
-        {useChatStore.getState().isStreaming && (
-          <div className="flex items-center gap-4 pl-[0.875rem] py-2 opacity-50">
-            <div className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.8)]" />
-            <div className="text-xs font-mono uppercase tracking-widest text-accent-cyan animate-pulse">
-              Orchestrating...
+        {isStreaming && (
+          <div className="flex items-center gap-4 pl-[0.875rem] py-2">
+            <div className={`w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.8)] ${
+              streamStatus === 'connecting' ? 'bg-accent-purple' :
+              streamStatus === 'reconnecting' ? 'bg-yellow-400' : 'bg-accent-cyan'
+            }`} />
+            <div className={`text-xs font-mono uppercase tracking-widest animate-pulse ${
+              streamStatus === 'connecting' ? 'text-accent-purple' :
+              streamStatus === 'reconnecting' ? 'text-yellow-400' : 'text-accent-cyan'
+            }`}>
+              {streamStatus === 'connecting' && 'Initializing Neural Orchestration Pipeline...'}
+              {streamStatus === 'reconnecting' && 'Re-establishing Neural Link...'}
+              {streamStatus === 'streaming' && 'Orchestrating Cognitive Subsystems...'}
             </div>
           </div>
         )}

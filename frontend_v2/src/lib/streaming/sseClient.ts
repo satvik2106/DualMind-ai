@@ -72,9 +72,37 @@ export async function streamChat(message: string): Promise<void> {
   const maxRetries = 2;
 
   const runStream = async (): Promise<void> => {
+    let sleepTimer: any = null;
+    let timeoutId: any = null;
+
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
       currentAbortController = new AbortController();
+
+      // Add initial cognitive event for cinematic feel
+      store.addCognitiveEvent({
+        type: 'planner_started',
+        content: 'Initializing Neural Orchestration Pipeline...'
+      });
+
+      // Render cold start detector: triggers if response takes longer than 4.5s
+      sleepTimer = setTimeout(() => {
+        store.addCognitiveEvent({
+          type: 'agent_thinking',
+          agent: 'planner',
+          content: 'Render cold-start detected. Waking up the neural orchestration engine... (this can take up to 50 seconds on Free Tier)'
+        });
+      }, 4500);
+
+      // Connection timeout: abort request after 65 seconds
+      timeoutId = setTimeout(() => {
+        if (currentAbortController) {
+          console.warn('[sseClient] Connection timed out after 65s');
+          currentAbortController.abort();
+        }
+      }, 65000);
+
+      console.info(`[sseClient] Initiating connection to ${apiUrl}/api/chat/stream...`);
       const response = await fetch(`${apiUrl}/api/chat/stream`, {
         method: 'POST',
         headers: { 
@@ -83,6 +111,12 @@ export async function streamChat(message: string): Promise<void> {
         body: JSON.stringify({ message, conversationId: conversationId || '' }),
         signal: currentAbortController.signal,
       });
+
+      // Clear timers upon successful response headers receipt
+      if (sleepTimer) clearTimeout(sleepTimer);
+      if (timeoutId) clearTimeout(timeoutId);
+
+      console.info(`[sseClient] Connected successfully. Response status: ${response.status}`);
 
       if (!response.ok) {
         const errText = await response.text();
@@ -158,19 +192,49 @@ export async function streamChat(message: string): Promise<void> {
       store.setStreamStatus('idle');
 
     } catch (err: any) {
+      if (sleepTimer) clearTimeout(sleepTimer);
+      if (timeoutId) clearTimeout(timeoutId);
+
+      // Log request context for debugging
+      console.error('[sseClient] Connection failure detailed log:', {
+        url: `${process.env.NEXT_PUBLIC_API_URL || ''}/api/chat/stream`,
+        error: err.message || err,
+        type: err.name || 'FetchError',
+        duration: `${((Date.now() - startTime) / 1000).toFixed(1)}s`
+      });
+
       if (err.name === 'AbortError') {
+        const duration = Date.now() - startTime;
+        if (duration >= 60000) {
+          store.setErrorDetail({
+            code: 'TIMEOUT',
+            message: 'Neural engine failed to synchronize within 60 seconds. The server might still be loading memory indices.'
+          });
+          store.setStreamStatus('error');
+          useChatStore.getState().setMessageStatus(assistantId, 'error');
+          return;
+        }
         store.setStreamStatus('idle');
         return;
       }
 
+      // Exponential Backoff / Retries
       if (retryCount < maxRetries && !err.message.includes('SERVER_ERROR:4')) {
         retryCount++;
         store.setStreamStatus('reconnecting');
-        await new Promise(r => setTimeout(r, 1000 * retryCount));
+        store.addCognitiveEvent({
+          type: 'connecting',
+          content: `Sync lost. Attempting auto-reconnect (${retryCount}/${maxRetries}) in ${retryCount * 2}s...`
+        });
+        await new Promise(r => setTimeout(r, 2000 * retryCount));
         return runStream();
       }
 
-      const errorMessage = err instanceof Error ? err.message : 'Unknown neural link failure';
+      let errorMessage = err instanceof Error ? err.message : 'Unknown neural link failure';
+      if (errorMessage === 'Failed to fetch') {
+        errorMessage = 'Failed to establish connection with the Render backend. The engine may be asleep or offline.';
+      }
+
       store.setErrorDetail({ 
         code: errorMessage.includes('SERVER_ERROR') ? 'API_FAILURE' : 'CONNECTION_INTERRUPTED',
         message: errorMessage
