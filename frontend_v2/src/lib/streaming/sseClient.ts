@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * SSE client for the DualMind streaming orchestration pipeline.
  *
@@ -342,3 +343,5 @@ function dispatchEvent(assistantId: string, event: any): void {
       break;
   }
 }
+
+

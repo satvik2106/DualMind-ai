@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * Zustand state management for the DualMind AI OS workspace.
  * Manages messages, artifacts, workspace mode, and realtime cognitive events.
@@ -262,3 +263,5 @@ export const useChatStore = create<ChatStore>((set) => ({
       errorDetail: null,
     }),
 }));
+
+

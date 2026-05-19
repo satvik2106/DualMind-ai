@@ -1,6 +1,6 @@
 {
-  "name": "frontend_v2",
-  "version": "0.1.0",
+  "name": "dualmind",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,12 +11,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@types/three": "^0.184.1",
-    "axios": "^1.16.1",
-    "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.16.0",
@@ -27,11 +22,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.11.1",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.6.0",
-    "three": "^0.184.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.13"
   },

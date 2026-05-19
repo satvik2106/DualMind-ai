@@ -17,17 +17,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "DualMind — AI Operating System",
   description: "A realtime AI Operating System with cinematic multi-agent orchestration. Plan. Research. Verify. Synthesize.",
-  icons: {
-    icon: "/favicon.svg",
-  },
+
   openGraph: {
     title: "DualMind — AI Operating System",
     description: "A realtime AI Operating System with cinematic multi-agent orchestration.",
-    url: "https://dualmind-ai.web.app",
+    url: "https://dualmind.ai",
     siteName: "DualMind",
     type: "website",
   },
-  metadataBase: new URL("https://dualmind-ai.web.app"),
+  metadataBase: new URL("https://dualmind.ai"),
 };
 
 export default function RootLayout({

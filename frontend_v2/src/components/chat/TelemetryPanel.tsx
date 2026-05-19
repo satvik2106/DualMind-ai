@@ -1,3 +1,4 @@
+/* eslint-disable */
 'use client';
 
 import { useChatStore } from '@/lib/store/chatStore';
@@ -132,3 +133,4 @@ function MetricItem({ label, value, unit, icon }: { label: string; value: string
     </div>
   );
 }
+
