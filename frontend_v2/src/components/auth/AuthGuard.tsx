@@ -10,7 +10,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
+    const isBetaUser = typeof window !== 'undefined' && localStorage.getItem('dualmind_logged_in') === 'true';
+    if (status === 'unauthenticated' && !isBetaUser) {
       router.push('/login');
     }
   }, [status, router]);
@@ -29,7 +30,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (status === 'authenticated') {
+  const isBetaUser = typeof window !== 'undefined' && localStorage.getItem('dualmind_logged_in') === 'true';
+  if (status === 'authenticated' || isBetaUser) {
     return <>{children}</>;
   }
 

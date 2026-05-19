@@ -103,9 +103,19 @@ function UserProfile({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { data: session } = useSession();
   const [isOpen, setIsOpen] = useState(false);
   
-  if (!session?.user) return null;
+  let user = session?.user;
+  if (!user && typeof window !== 'undefined') {
+    const storedUser = localStorage.getItem('dualmind_static_user');
+    if (storedUser) {
+      try {
+        user = JSON.parse(storedUser);
+      } catch (e) {}
+    }
+  }
+
+  if (!user) return null;
   
-  const initials = (session.user.name || session.user.email || 'U')
+  const initials = (user.name || user.email || 'U')
     .split(' ')
     .map(n => n[0])
     .join('')
@@ -118,16 +128,16 @@ function UserProfile({ onOpenSettings }: { onOpenSettings: () => void }) {
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2.5 w-full p-2 rounded-xl hover:bg-glass-overlay transition-all group"
       >
-        {session.user.image ? (
-          <img src={session.user.image} alt="" className="w-8 h-8 rounded-lg object-cover ring-1 ring-white/10" />
+        {user.image ? (
+          <img src={user.image} alt="" className="w-8 h-8 rounded-lg object-cover ring-1 ring-white/10" />
         ) : (
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan/30 to-accent-purple/30 flex items-center justify-center text-xs font-bold text-foreground ring-1 ring-border-glass">
             {initials}
           </div>
         )}
         <div className="flex-1 text-left min-w-0">
-          <div className="text-xs font-medium text-foreground truncate">{session.user.name || 'User'}</div>
-          <div className="text-[10px] text-foreground-muted truncate">{session.user.email}</div>
+          <div className="text-xs font-medium text-foreground truncate">{user.name || 'User'}</div>
+          <div className="text-[10px] text-foreground-muted truncate">{user.email}</div>
         </div>
         <ChevronDown size={14} className={`text-foreground-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
