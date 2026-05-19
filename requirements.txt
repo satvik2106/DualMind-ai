@@ -1,23 +1,25 @@
-fastapi
-uvicorn[standard]
-requests
-streamlit
-transformers
-wikipedia
-duckduckgo-search
-python-dotenv
-python-multipart
-PyPDF2
-pdfplumber
-openai
-gunicorn
-matplotlib
-fpdf2
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# AI OS Core Dependencies
-chromadb==0.4.24
-sentence-transformers==2.5.1
-trafilatura==1.8.1
-pdfkit==1.0.0
-networkx==3.2.1
+# Web Server & API
+fastapi>=0.104.0
+uvicorn[standard]>=0.23.2
+pydantic>=2.4.2
+requests>=2.31.0
+httpx>=0.25.0
+
+# AI Services
+openai>=1.2.0
+
+# Light Orchestration & Utils
+python-dotenv>=1.0.0
+python-multipart>=0.0.6
 cachetools==5.3.3
+
+# ML / Heavy packages (CPU ONLY explicitly requested)
+torch==2.5.1+cpu
+sentence-transformers==2.5.1
+chromadb==0.4.24
+networkx==3.2.1
+
+# Remove entirely unused heavy ML frameworks:
+# No cuda, No triton, No streamlit, No matplotlib, No pypdf2, No pdfplumber, No huggingface heavy stacks

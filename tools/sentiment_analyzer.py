@@ -3,7 +3,6 @@ Sentiment Analyzer Tool
 Performs sentiment analysis using HuggingFace transformers.
 """
 
-from transformers import pipeline
 import logging
 from typing import Dict, Any, Tuple
 
@@ -13,6 +12,7 @@ class SentimentAnalyzer:
     def __init__(self):
         """Initialize the sentiment analyzer."""
         try:
+            from transformers import pipeline
             # Use a lightweight sentiment analysis model
             self.analyzer = pipeline(
                 "sentiment-analysis",

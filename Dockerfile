@@ -23,5 +23,5 @@ EXPOSE 8000
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 
-# Run with Gunicorn for production (Render sets $PORT dynamically)
-CMD gunicorn api_server:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120
+# Run with a single Uvicorn worker to stay within Render's 512Mi free tier limit
+CMD ["sh", "-c", "uvicorn api_server:app --host 0.0.0.0 --port ${PORT:-8000}"]
